@@ -30,6 +30,7 @@ const taskExtractor = createTaskExtractor({
   provider: process.env.TASK_EXTRACTOR || "auto",
   chatflowUrl,
   chatflowToken,
+  holidayDates: process.env.HOLIDAY_DATES || "",
   compassBaseUrl: process.env.COMPASS_BASE_URL || "https://compass.llm.shopee.io/compass-api/v1",
   compassApiKey: process.env.COMPASS_API_KEY || "",
   compassModel: process.env.COMPASS_MODEL || "compass-max",

@@ -8,9 +8,19 @@ Priority is evaluated based on the task's deadline and the content available at 
 - **P1 — Important:** The deadline is 2–3 calendar days away.
 - **P2 — Normal:** The deadline is more than 3 calendar days away.
 
+## Khi deadline chưa được cung cấp
+
+- Nếu message có nhãn Priority rõ ràng (`P0`, `P1`, `P2`), giữ nhãn đó.
+- Có thể nhận diện ngôn ngữ ưu tiên rõ ràng: "khẩn cấp", "rất gấp", "làm gấp", "urgent", "ASAP" → P0; "quan trọng", "ưu tiên", "important" → P1; "bình thường", "không gấp", "normal" → P2.
+- Khi đã có Priority nhưng chưa có deadline, suy ra deadline như sau:
+  - P0 → hôm nay.
+  - P1 → sau 3 ngày lịch.
+  - P2 → sau 7 ngày lịch.
+
 ## Default priority
 
-- If the task has no deadline, or the available content does not provide enough information to determine urgency, the priority defaults to P2 — Normal. Do not ask for clarification and do not infer urgency from wording, sender, or topic — only an explicit, valid deadline can move the priority away from the P2 default.
+- If the task has no deadline and no usable Priority signal, the priority defaults to P2 — Normal and the deadline defaults to 7 calendar days after the reference date.
+- Do not infer priority from sender or topic. Only an explicit Priority label, clear urgency wording listed above, or a valid deadline may change the default.
 
 ## Deadline-date escalation
 

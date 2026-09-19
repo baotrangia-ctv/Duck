@@ -46,6 +46,8 @@ Các rule extract được tách thành file Markdown để dễ chỉnh sửa:
 - rules/DEADLINE_POLICY.md — cách quy đổi ngày tương đối thành DD/MM/YYYY.
 - rules/TASK_PRIORITY_POLICY.md — quy ước P0/P1/P2.
 
+Các cụm `tuần sau`/`trong tuần sau` dùng ngày làm việc hợp lệ cuối cùng của tuần kế tiếp. Mặc định thứ Bảy và Chủ Nhật là ngày nghỉ; có thể thêm ngày lễ bằng biến `HOLIDAY_DATES`, ví dụ `HOLIDAY_DATES=01/05/2026,02/09/2026`. Khi không có deadline, hệ thống ưu tiên lấy Priority để suy ra ngày: P0 là hôm nay, P1 sau 3 ngày lịch, P2 sau 7 ngày lịch; nếu không có tín hiệu Priority thì dùng P2 và deadline sau 7 ngày.
+
 Server đọc các file này khi khởi động và ghép chúng vào EXTRACTION_PROMPT; sau khi sửa rule cần restart server.
 
 Mặc định `TASK_EXTRACTOR=auto` sẽ ưu tiên Chatflow đang có của project, sau đó dùng Compass LLM giống project `Claude`. Nếu chưa cấu hình AI, parser vẫn xử lý được tin nhắn có nhãn rõ ràng như `PIC: an@example.com; deadline: 30/09; nội dung công việc: cập nhật dashboard`.
@@ -54,6 +56,7 @@ Mặc định `TASK_EXTRACTOR=auto` sẽ ưu tiên Chatflow đang có của proj
 
 ```env
 TASK_EXTRACTOR=auto
+HOLIDAY_DATES=01/05/2026,02/09/2026
 CHATFLOW_API_URL=https://ai.insea.io/api/chatflows/26607/run?stream=true
 CHATFLOW_API_TOKEN=your_chatflow_token
 GOOGLE_SHEETS_SPREADSHEET_ID=your_spreadsheet_id_or_full_url

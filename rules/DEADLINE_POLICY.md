@@ -6,7 +6,7 @@
 - Thời gian trong ngày (giờ, buổi sáng/trưa/chiều/tối/đêm) không cần giữ lại trong Sheet, chỉ giữ phần ngày. Biểu thức có mốc giờ (ví dụ "4h chiều nay", "9h sáng mai") chỉ dùng để xác định NGÀY được neo tới ("nay"/"mai"), bỏ phần giờ khi trả kết quả.
 - Khi tin nhắn nêu nhiều mốc thời gian, ưu tiên mốc được gắn nhãn deadline rõ ràng (theo sau/trước các từ như "deadline", "hạn chót", "hạn hoàn thành", "due date", "trước", "hoàn thành/hoàn tất vào ngày", "vào ngày") hơn các ngày xuất hiện ngẫu nhiên khác trong câu.
 - Nếu tin nhắn nêu một khoảng ngày (ví dụ "từ ngày 20 đến 25/9", "20-25/9"), dùng ngày kết thúc của khoảng làm deadline.
-- Nếu message không đủ thông tin để xác định một ngày hợp lệ duy nhất, trả null. Không hỏi lại, không tự suy diễn hoặc bịa ngày.
+- Nếu không tìm thấy deadline rõ ràng, trước tiên dùng Priority đã extract để suy ra deadline theo `TASK_PRIORITY_POLICY.md`. Nếu Priority cũng không xác định được, dùng Priority P2 và deadline mặc định là 7 ngày lịch sau reference date. Không hỏi lại.
 
 ## Ngày tuyệt đối / một phần
 - Định dạng số có năm (18/9/2026, 18-9-2026, 18.9.2026...): giữ nguyên, chuẩn hoá về DD/MM/YYYY.
@@ -31,10 +31,13 @@ Một tuần được tính từ Thứ Hai đến Chủ Nhật.
 - "thứ X tuần trước": thứ X của tuần liền trước tuần chứa ngày tin nhắn (kết quả có thể là quá khứ, giữ nguyên theo nguyên tắc ở mục trên).
 
 ## Biểu thức theo tuần (không kèm thứ)
-- "trong tuần này": Thứ Sáu của tuần chứa ngày tin nhắn.
-- "trong tuần sau" / "trong tuần tới": Thứ Sáu của tuần kế tiếp.
-- "trong tuần trước": Thứ Sáu của tuần liền trước.
-- "tuần sau nữa" / "trong hai tuần tới": Thứ Sáu của tuần thứ hai kể từ tuần chứa ngày tin nhắn.
+
+Một "ngày làm việc hợp lệ" là ngày từ Thứ Hai đến Thứ Sáu và không nằm trong danh sách ngày nghỉ được cấu hình ở `HOLIDAY_DATES`. Khi một quy tắc bên dưới trước đây dùng Thứ Sáu làm ngày đại diện, phải chọn ngày làm việc hợp lệ cuối cùng của tuần tương ứng, duyệt lùi từ Chủ Nhật về Thứ Hai.
+
+- "tuần sau" / "trong tuần sau" / "tuần tới" / "trong tuần tới": ngày làm việc hợp lệ cuối cùng của tuần kế tiếp.
+- "trong tuần này": ngày làm việc hợp lệ cuối cùng của tuần chứa ngày tin nhắn.
+- "trong tuần trước": ngày làm việc hợp lệ cuối cùng của tuần liền trước.
+- "tuần sau nữa" / "trong hai tuần tới": ngày làm việc hợp lệ cuối cùng của tuần thứ hai kể từ tuần chứa ngày tin nhắn.
 - "đầu tuần (này/sau/trước)": Thứ Hai của tuần tương ứng.
 - "giữa tuần (này/sau/trước)": Thứ Tư của tuần tương ứng.
 - "cuối tuần (này/sau/trước)" mang nghĩa ngày nghỉ: Chủ Nhật của tuần tương ứng.
@@ -51,4 +54,5 @@ Một tuần được tính từ Thứ Hai đến Chủ Nhật.
 - "trong N tháng (nữa)", "N tháng nữa", "sau N tháng": cộng N tháng theo lịch, giữ nguyên ngày trong tháng; nếu tháng đích không có ngày đó (ví dụ ngày 31 rơi vào tháng chỉ có 30 ngày), dùng ngày cuối cùng của tháng đích.
 
 ## Không đủ thông tin
-- Nếu không có bất kỳ biểu thức ngày/thứ/tuần/tháng nào ở trên xuất hiện, hoặc biểu thức xuất hiện nhưng không thể quy về một ngày duy nhất (ví dụ chỉ nói "sớm", "gấp", "khi nào rảnh"), trả null. Không hỏi lại và không tự suy diễn.
+- Nếu không có biểu thức ngày/thứ/tuần/tháng, trước tiên thử lấy Priority từ nhãn P0/P1/P2 hoặc ngôn ngữ ưu tiên rõ ràng, rồi suy ra deadline theo `TASK_PRIORITY_POLICY.md`.
+- Nếu cả deadline và Priority đều không có tín hiệu đủ rõ, dùng mặc định P2 và deadline sau 7 ngày lịch.

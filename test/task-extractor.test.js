@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTaskExtractor, extractLabeledFields, extractPayloadHints, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
+import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
 
 test("parseTaskFields reads and normalizes the required JSON fields", () => {
@@ -53,6 +53,7 @@ test("priority defaults to P2 when no deadline is available", async () => {
   const extractor = createTaskExtractor({ provider: "rules" });
   const result = await extractor.extract("Cập nhật tài liệu hướng dẫn", { event_type: "message" });
   assert.equal(result.priority, "P2");
+  assert.match(result.deadline, /^\d{2}\/\d{2}\/\d{4}$/);
 });
 
 test("priority follows the policy for ISO deadlines", () => {
@@ -89,7 +90,25 @@ test("deadline normalization resolves the nearest future date from partial dates
   assert.equal(normalizeDeadline("18/9", "2026-09-19"), "18/09/2027");
   assert.equal(normalizeDeadline("ngày 18", "2026-09-19"), "18/10/2026");
   assert.equal(normalizeDeadline("thứ 2 tuần sau", "2026-09-19"), "21/09/2026");
+  assert.equal(normalizeDeadline("tuần sau", "2026-09-19"), "25/09/2026");
   assert.equal(normalizeDeadline("trong tuần sau", "2026-09-19"), "25/09/2026");
+  assert.equal(normalizeDeadline("tuần sau", "2026-09-19", "25/09/2026"), "24/09/2026");
+  assert.equal(normalizeDeadline("trong tuần này", "2026-09-19", "18/09/2026"), "17/09/2026");
+});
+
+test("priority maps to a deadline when no explicit date is available", () => {
+  assert.equal(deadlineFromPriority("P0", "2026-09-19"), "19/09/2026");
+  assert.equal(deadlineFromPriority("P1", "2026-09-19"), "22/09/2026");
+  assert.equal(deadlineFromPriority("P2", "2026-09-19"), "26/09/2026");
+  assert.equal(extractLabeledFields("priority: P1; nội dung công việc: cập nhật dashboard", "2026-09-19").deadline, "22/09/2026");
+});
+
+test("rules provider infers urgent priority and today's deadline", async () => {
+  const extractor = createTaskExtractor({ provider: "rules" });
+  const result = await extractor.extract("Làm gấp giúp anh tối ưu client", { event_type: "message" });
+  assert.equal(result.priority, "P0");
+  const today = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date());
+  assert.equal(result.deadline, today);
 });
 
 test("payload hints read a date introduced by a completion phrase", () => {
