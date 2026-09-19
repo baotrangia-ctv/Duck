@@ -49,6 +49,12 @@ test("rules provider keeps the message as task content without inventing fields"
   });
 });
 
+test("priority defaults to P2 when no deadline is available", async () => {
+  const extractor = createTaskExtractor({ provider: "rules" });
+  const result = await extractor.extract("Cập nhật tài liệu hướng dẫn", { event_type: "message" });
+  assert.equal(result.priority, "P2");
+});
+
 test("priority follows the policy for ISO deadlines", () => {
   assert.equal(priorityFromIsoDeadline("2026-09-18", "2026-09-18"), "P0");
   assert.equal(priorityFromIsoDeadline("2026-09-20", "2026-09-18"), "P1");

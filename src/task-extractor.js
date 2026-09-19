@@ -1,12 +1,29 @@
 const TASK_PRIORITY_POLICY = `
-CHÍNH SÁCH PRIORITY:
-- P0 — Urgent: deadline là hôm nay, ngày mai hoặc đã quá hạn.
-- P1 — Important: deadline còn 2–3 ngày lịch.
-- P2 — Normal: deadline còn hơn 3 ngày lịch.
-- Không có deadline: priority phải là "Chờ người nhận chọn".
-- Không được suy đoán P0/P1/P2 chỉ từ các từ như "gấp", "khẩn", khách hàng, cuộc họp hoặc nội dung task.
-- Nếu không thể xác định khoảng cách ngày lịch một cách chắc chắn: priority là "P2 — Normal".
-- Chỉ đánh giá priority. Không lên lịch reminder, không escalation và không gọi tool.`;
+# Task Priority Policy
+
+Priority is evaluated based on the task's deadline and the content available at the time of evaluation. No follow-up question or user response is required — priority must be determined solely from the information already provided.
+
+## Priority levels
+
+- **P0 — Urgent:** The deadline is today or tomorrow (within 1 calendar day), or the task is overdue.
+- **P1 — Important:** The deadline is 2–3 calendar days away.
+- **P2 — Normal:** The deadline is more than 3 calendar days away.
+
+## Default priority
+
+- If the task has **no deadline**, or the available content does not provide enough information to determine urgency, the priority defaults to **P2 — Normal**. Do not ask for clarification and do not infer urgency from wording, sender, or topic — only an explicit, valid deadline can move the priority away from the P2 default.
+
+## Deadline-date escalation
+
+On the deadline date:
+
+- P1 tasks are escalated to P0.
+- P2 tasks are escalated to P0.
+- P0 tasks remain P0.
+
+Overdue tasks are treated as P0 until resolved or cancelled.
+
+Only evaluate priority. Do not schedule reminders, ask follow-up questions, escalate through external tools, or call any tool.`;
 
 const EXTRACTION_PROMPT = `Bạn là mô-đun trích xuất task từ một event SeaTalk nội bộ. Bạn KHÔNG phải bot hội thoại và không được trả lời người dùng.
 
@@ -15,7 +32,7 @@ Mục tiêu: đọc message text cùng payload SeaTalk, sau đó trả về DUY 
   "task": string | null,
   "pic": string | null,
   "deadline": "DD/MM/YYYY" | null,
-  "priority": "P0" | "P1" | "P2" | "Chờ người nhận chọn" | null,
+  "priority": "P0" | "P1" | "P2" | null,
   "status": "IN PROGRESS" | "DONE" | "NOT DO" | null
 }
 
@@ -57,7 +74,6 @@ function normalizePriority(value) {
   if (/^p0\b/i.test(text)) return "P0";
   if (/^p1\b/i.test(text)) return "P1";
   if (/^p2\b/i.test(text)) return "P2";
-  if (/chờ\s+người\s+nhận\s+chọn/i.test(text)) return "Chờ người nhận chọn";
   return null;
 }
 
@@ -173,9 +189,9 @@ function priorityFromIsoDeadline(deadline, referenceDate = getReferenceDate()) {
 }
 
 function resolvePriority(priority, deadline) {
-  if (!deadline) return "Chờ người nhận chọn";
+  if (!deadline) return "P2";
   const normalized = normalizePriority(priority);
-  if (normalized && normalized !== "Chờ người nhận chọn") return normalized;
+  if (normalized) return normalized;
   return priorityFromIsoDeadline(deadlineToIso(deadline)) || "P2";
 }
 
