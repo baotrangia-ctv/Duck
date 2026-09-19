@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Màn hình theo dõi tin nhắn bot SeaTalk cho Alpha Intel" />
+    <title>Alpha Intel · SeaTalk inbox</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230c1726'/%3E%3Cpath d='M17 38.5 27.5 49 48 16' fill='none' stroke='%234de0bc' stroke-linecap='round' stroke-linejoin='round' stroke-width='8'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div>
+            <p class="eyebrow">ALPHA INTEL</p>
+            <h1>SeaTalk inbox</h1>
+          </div>
+        </div>
+        <div class="connection-state" id="connectionState" data-state="connecting">
+          <span class="status-dot"></span>
+          <span id="connectionLabel">Đang kết nối</span>
+        </div>
+      </header>
+
+      <main class="main-grid">
+        <section class="workspace" aria-label="Bảng tin nhắn SeaTalk">
+          <div class="intro-row">
+            <div>
+              <p class="section-kicker">REALTIME EVENT STREAM</p>
+              <h2>Tin nhắn nhận từ bot</h2>
+              <p class="intro-copy">Mọi callback từ SeaTalk sẽ xuất hiện ở đây ngay khi server nhận được.</p>
+            </div>
+            <button class="ghost-button" id="clearButton" type="button">Xóa lịch sử</button>
+          </div>
+
+          <div class="metrics" aria-label="Tổng quan">
+            <article class="metric-card">
+              <span class="metric-label">Đã nhận</span>
+              <strong id="messageCount">0</strong>
+              <span class="metric-note">sự kiện trong bộ nhớ</span>
+            </article>
+            <article class="metric-card accent-card">
+              <span class="metric-label">Sự kiện gần nhất</span>
+              <strong id="lastEvent">Chưa có</strong>
+              <span class="metric-note" id="lastEventTime">Đang chờ callback</span>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Callback URL</span>
+              <strong class="mono" id="callbackPath">/callback</strong>
+              <span class="metric-note">POST từ SeaTalk</span>
+            </article>
+            <article class="metric-card accent-card">
+              <span class="metric-label">Đã extract</span>
+              <strong id="extractedTaskCount">0</strong>
+              <span class="metric-note">task đang hiển thị</span>
+            </article>
+          </div>
+
+          <div class="tasks-card">
+            <div class="tasks-header">
+              <div>
+                <span class="section-kicker">EXTRACTED TASK DATA</span>
+                <h3>Thông tin sau khi extract payload</h3>
+              </div>
+              <span class="preview-pill" id="sheetsModePill">GOOGLE SHEETS · OAUTH</span>
+            </div>
+            <div class="tasks-table-wrap">
+              <table class="tasks-table" id="tasksTable">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>TASK</th>
+                    <th>PIC</th>
+                    <th>DEADLINE</th>
+                    <th>PRIORITY</th>
+                    <th>STATUS</th>
+                    <th>CREATEDAT</th>
+                    <th>UPDATEDAT</th>
+                  </tr>
+                </thead>
+                <tbody id="tasksTableBody"></tbody>
+              </table>
+              <div class="tasks-empty" id="tasksEmpty">
+                <span class="tasks-empty-icon">◇</span>
+                <strong>Chưa có dữ liệu extract</strong>
+                <span>Khi bot nhận tin nhắn, 8 field sẽ xuất hiện ở đây.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="feed-card">
+            <div class="feed-header">
+              <div>
+                <span class="live-pill"><span class="status-dot"></span> LIVE</span>
+                <h3>Activity feed</h3>
+              </div>
+              <button class="test-button" id="testButton" type="button"><span>＋</span> Gửi tin nhắn thử</button>
+            </div>
+            <div class="feed" id="feed" aria-live="polite">
+              <div class="empty-state" id="emptyState">
+                <div class="empty-icon" aria-hidden="true">⌁</div>
+                <h4>Chưa có tin nhắn</h4>
+                <p>Bấm “Gửi tin nhắn thử” hoặc nhắn tin cho bot để bắt đầu theo dõi.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="sidebar" aria-label="Cấu hình kết nối">
+          <div class="side-card connection-card">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">CONNECTION</p>
+                <h3>Điểm nhận callback</h3>
+              </div>
+              <span class="shield-icon" aria-hidden="true">✓</span>
+            </div>
+            <label class="field-label" for="webhookUrl">Webhook URL</label>
+            <div class="copy-field">
+              <code id="webhookUrl">http://localhost:3030/callback</code>
+              <button id="copyButton" type="button" aria-label="Sao chép webhook URL">⧉</button>
+            </div>
+            <p class="side-note">Khi deploy, thay <code>localhost:3030</code> bằng domain public của server.</p>
+          </div>
+
+          <div class="side-card google-card">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">GOOGLE SHEETS</p>
+                <h3 id="googleStatusTitle">Đang kiểm tra kết nối</h3>
+              </div>
+              <span class="shield-icon" id="googleStatusIcon" aria-hidden="true">↗</span>
+            </div>
+            <p class="side-note google-account" id="googleStatusText">Website sẽ dùng OAuth để ghi task bằng tài khoản Google của bạn.</p>
+            <div class="google-actions">
+              <a class="google-connect-button" id="googleConnectButton" href="/auth/google">Kết nối Google</a>
+              <button class="google-disconnect-button" id="googleDisconnectButton" type="button" hidden>Ngắt kết nối</button>
+            </div>
+            <p class="side-note">Tài khoản đăng nhập cần có quyền <strong>Editor</strong> trên Google Sheet.</p>
+          </div>
+
+          <div class="side-card setup-card">
+            <p class="section-kicker">QUICK SETUP</p>
+            <h3>Kết nối với SeaTalk</h3>
+            <ol class="setup-list">
+              <li><span>01</span><div>Mở <strong>Event Callback</strong> trong app Bot.</div></li>
+              <li><span>02</span><div>Dán URL callback ở trên và lưu để SeaTalk xác minh.</div></li>
+              <li><span>03</span><div>Nhắn tin cho bot. Sự kiện sẽ hiện trực tiếp trên màn hình.</div></li>
+            </ol>
+            <a class="docs-link" href="https://open.seatalk.io/docs/introduction-to-seatalk-open-platform" target="_blank" rel="noreferrer">Mở tài liệu SeaTalk <span>↗</span></a>
+          </div>
+
+          <div class="side-card event-card">
+            <div class="event-card-title"><span class="tiny-icon">{ }</span><span>Event đang hỗ trợ</span></div>
+            <div class="event-row"><code>message_from_bot_subscriber</code><span>Tin nhắn</span></div>
+            <div class="event-row"><code>new_mentioned_message_received_from_group_chat</code><span>Group chat</span></div>
+            <div class="event-row"><code>new_bot_subscriber</code><span>Đăng ký mới</span></div>
+            <div class="event-row"><code>event_verification</code><span>Xác minh URL</span></div>
+          </div>
+        </aside>
+      </main>
+      <footer>Alpha Intel · SeaTalk Open Platform listener · <span id="footerStatus">Local mode</span></footer>
+    </div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Alpha Intel — flow bot chat đến Google Sheets</title>
+  <desc id="desc">Infographic mô tả luồng SeaTalk webhook, trích xuất PIC deadline nội dung công việc, dashboard realtime và ghi Google Sheets.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07101d"/>
+      <stop offset="0.55" stop-color="#0b1c30"/>
+      <stop offset="1" stop-color="#07121f"/>
+    </linearGradient>
+    <linearGradient id="cyanCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d2c42"/>
+      <stop offset="1" stop-color="#0a1c2f"/>
+    </linearGradient>
+    <linearGradient id="violetCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2347"/>
+      <stop offset="1" stop-color="#101b34"/>
+    </linearGradient>
+    <linearGradient id="greenCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#123b39"/>
+      <stop offset="1" stop-color="#0c252c"/>
+    </linearGradient>
+    <linearGradient id="live" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#57f0d0"/>
+      <stop offset="1" stop-color="#61c8ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#57f0d0"/>
+    </marker>
+    <marker id="arrowMuted" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#7186a4"/>
+    </marker>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#8bb0cf" stroke-opacity="0.055" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1800" height="1200" fill="url(#bg)"/>
+  <rect width="1800" height="1200" fill="url(#grid)"/>
+  <circle cx="1550" cy="80" r="270" fill="#2fd9c5" opacity="0.055"/>
+  <circle cx="240" cy="1120" r="320" fill="#6b72ff" opacity="0.06"/>
+
+  <!-- Header -->
+  <text x="82" y="82" fill="#65efd5" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">ALPHA INTEL · SEATALK INBOX</text>
+  <text x="82" y="143" fill="#f2f7ff" font-family="Segoe UI, Arial, sans-serif" font-size="46" font-weight="750">Bot chat → extract task → Google Sheets</text>
+  <text x="84" y="180" fill="#8fa9c5" font-family="Segoe UI, Arial, sans-serif" font-size="20">Tổng hợp quá trình làm, flow xử lý và kết quả live của project C:\_Code\craftland\AlphaIntel</text>
+
+  <!-- Status pills -->
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="650">
+    <rect x="1105" y="48" width="190" height="38" rx="19" fill="#112c35" stroke="#3fe4c3" stroke-opacity="0.45"/>
+    <circle cx="1130" cy="67" r="6" fill="#57f0d0" filter="url(#glow)"/>
+    <text x="1146" y="73" fill="#b8ffe9">LIVE STATUS</text>
+    <rect x="1308" y="48" width="188" height="38" rx="19" fill="#122d3a" stroke="#4bbfff" stroke-opacity="0.4"/>
+    <text x="1329" y="73" fill="#bfeaff">CHATFLOW · ON</text>
+    <rect x="1509" y="48" width="208" height="38" rx="19" fill="#142e2d" stroke="#57f0d0" stroke-opacity="0.4"/>
+    <text x="1530" y="73" fill="#c8ffef">SHEETS · WRITTEN</text>
+    <rect x="1105" y="98" width="190" height="38" rx="19" fill="#172440" stroke="#91a9ff" stroke-opacity="0.45"/>
+    <text x="1128" y="123" fill="#d4dcff">OAUTH · AUTHORIZED</text>
+    <rect x="1308" y="98" width="188" height="38" rx="19" fill="#172440" stroke="#91a9ff" stroke-opacity="0.4"/>
+    <text x="1342" y="123" fill="#d4dcff">TESTS · 7/7 PASS</text>
+  </g>
+
+  <!-- Main flow rail -->
+  <path d="M155 274 H1645" stroke="#294660" stroke-width="2" stroke-dasharray="4 12" opacity="0.8"/>
+  <text x="82" y="244" fill="#7f9ab8" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="2">END-TO-END FLOW</text>
+
+  <!-- Card 1 -->
+  <g filter="url(#shadow)">
+    <rect x="82" y="292" width="475" height="390" rx="22" fill="url(#cyanCard)" stroke="#2bbdd2" stroke-opacity="0.48"/>
+    <rect x="82" y="292" width="475" height="7" rx="3" fill="#55e8d2"/>
+  </g>
+  <circle cx="124" cy="346" r="22" fill="#123e4a" stroke="#57f0d0"/>
+  <text x="124" y="353" text-anchor="middle" fill="#caffef" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="800">01</text>
+  <text x="164" y="350" fill="#f2f7ff" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="750">NHẬN INPUT</text>
+  <text x="114" y="397" fill="#78dff0" font-family="Consolas, monospace" font-size="18">SeaTalk Bot / Webhook</text>
+  <line x1="114" y1="417" x2="525" y2="417" stroke="#71b6d1" stroke-opacity="0.25"/>
+  <text x="114" y="454" fill="#d9e8f8" font-family="Segoe UI, Arial, sans-serif" font-size="19" font-weight="650">POST /callback</text>
+  <text x="114" y="486" fill="#a8bdd4" font-family="Segoe UI, Arial, sans-serif" font-size="17">event_type:</text>
+  <text x="224" y="486" fill="#57f0d0" font-family="Consolas, monospace" font-size="16">message_from_bot_subscriber</text>
+  <text x="114" y="528" fill="#a8bdd4" font-family="Segoe UI, Arial, sans-serif" font-size="17">Bảo vệ:</text>
+  <text x="195" y="528" fill="#d9e8f8" font-family="Segoe UI, Arial, sans-serif" font-size="17">SHA-256 signature</text>
+  <text x="114" y="563" fill="#a8bdd4" font-family="Segoe UI, Arial, sans-serif" font-size="17">Chống trùng:</text>
+  <text x="239" y="563" fill="#d9e8f8" font-family="Segoe UI, Arial, sans-serif" font-size="17">event_id / message_id</text>
+  <rect x="114" y="605" width="395" height="42" rx="10" fill="#071621" fill-opacity="0.55" stroke="#3e7081" stroke-opacity="0.45"/>
+  <text x="133" y="632" fill="#96aec8" font-family="Segoe UI, Arial, sans-serif" font-size="15">parseSeaTalkEvent(payload)</text>
+
+  <!-- Arrow 1 -->
+  <path d="M579 486 H635" stroke="#57f0d0" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="579" y="462" fill="#70cfc2" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="650">payload</text>
+
+  <!-- Card 2 -->
+  <g filter="url(#shadow)">
+    <rect x="650" y="292" width="500" height="390" rx="22" fill="url(#violetCard)" stroke="#7f8cff" stroke-opacity="0.5"/>
+    <rect x="650" y="292" width="500" height="7" rx="3" fill="#9099ff"/>
+  </g>
+  <circle cx="692" cy="346" r="22" fill="#2a2c5e" stroke="#9ba3ff"/>
+  <text x="692" y="353" text-anchor="middle" fill="#e0e2ff" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="800">02</text>
+  <text x="732" y="350" fill="#f2f7ff" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="750">XỬ LÝ &amp; EXTRACT</text>
+  <text x="682" y="397" fill="#b6bdff" font-family="Consolas, monospace" font-size="18">src/task-extractor.js</text>
+  <line x1="682" y1="417" x2="1118" y2="417" stroke="#9ba3ff" stroke-opacity="0.25"/>
+  <text x="682" y="453" fill="#dfe3ff" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="650">Provider ưu tiên</text>
+  <rect x="876" y="430" width="184" height="34" rx="17" fill="#3b3d78" stroke="#9ba3ff" stroke-opacity="0.45"/>
+  <text x="968" y="453" text-anchor="middle" fill="#e5e7ff" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">Chatflow · ACTIVE</text>
+  <text x="682" y="491" fill="#aeb8d2" font-family="Segoe UI, Arial, sans-serif" font-size="16">Fallback khi cần:</text>
+  <text x="831" y="491" fill="#d6dcff" font-family="Segoe UI, Arial, sans-serif" font-size="16">Compass → Rules</text>
+  <text x="682" y="533" fill="#aeb8d2" font-family="Segoe UI, Arial, sans-serif" font-size="16">Trích xuất 3 field:</text>
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">
+    <rect x="682" y="552" width="98" height="34" rx="8" fill="#24325e"/>
+    <text x="731" y="575" text-anchor="middle" fill="#bfc8ff">PIC</text>
+    <rect x="790" y="552" width="122" height="34" rx="8" fill="#24325e"/>
+    <text x="851" y="575" text-anchor="middle" fill="#bfc8ff">deadline</text>
+    <rect x="922" y="552" width="187" height="34" rx="8" fill="#24325e"/>
+    <text x="1015" y="575" text-anchor="middle" fill="#bfc8ff">task_content</text>
+  </g>
+  <rect x="682" y="608" width="436" height="42" rx="10" fill="#0b132a" fill-opacity="0.65" stroke="#5862ae" stroke-opacity="0.55"/>
+  <text x="704" y="635" fill="#aeb8d2" font-family="Segoe UI, Arial, sans-serif" font-size="15">SSE /api/stream · cập nhật processing realtime</text>
+
+  <!-- Arrow 2 -->
+  <path d="M1172 486 H1228" stroke="#57f0d0" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="1170" y="462" fill="#70cfc2" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="650">fields</text>
+
+  <!-- Card 3 -->
+  <g filter="url(#shadow)">
+    <rect x="1243" y="292" width="475" height="390" rx="22" fill="url(#greenCard)" stroke="#45d7bf" stroke-opacity="0.52"/>
+    <rect x="1243" y="292" width="475" height="7" rx="3" fill="#57f0d0"/>
+  </g>
+  <circle cx="1285" cy="346" r="22" fill="#16514a" stroke="#57f0d0"/>
+  <text x="1285" y="353" text-anchor="middle" fill="#d1fff2" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="800">03</text>
+  <text x="1325" y="350" fill="#f2f7ff" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="750">KẾT QUẢ</text>
+  <text x="1275" y="397" fill="#75e8d1" font-family="Consolas, monospace" font-size="18">Dashboard + Google Sheets</text>
+  <line x1="1275" y1="417" x2="1686" y2="417" stroke="#76ddc7" stroke-opacity="0.25"/>
+  <text x="1275" y="454" fill="#d8fff2" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="650">Dashboard realtime</text>
+  <text x="1275" y="486" fill="#a9c9c5" font-family="Segoe UI, Arial, sans-serif" font-size="17">Bảng extract + payload gốc</text>
+  <text x="1275" y="528" fill="#d8fff2" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="650">Google OAuth</text>
+    <text x="1275" y="560" fill="#a9c9c5" font-family="Segoe UI, Arial, sans-serif" font-size="17">Sheets API append vào vùng A:H</text>
+  <rect x="1275" y="592" width="410" height="58" rx="12" fill="#0a201f" stroke="#49cdb4" stroke-opacity="0.5"/>
+  <text x="1294" y="618" fill="#87b8ae" font-family="Segoe UI, Arial, sans-serif" font-size="14">WRITE RESULT</text>
+  <text x="1294" y="640" fill="#aaffea" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="700">written · row 5 · updatedRange OK</text>
+
+  <!-- Live result panel -->
+  <g filter="url(#shadow)">
+    <rect x="82" y="735" width="1636" height="300" rx="24" fill="#0d1b2b" stroke="#41627f" stroke-opacity="0.55"/>
+  </g>
+  <text x="116" y="783" fill="#65efd5" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" letter-spacing="2">LIVE RUN · KẾT QUẢ ĐÃ XÁC NHẬN</text>
+  <text x="116" y="825" fill="#f2f7ff" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="750">Tin nhắn SeaTalk đầu vào</text>
+  <rect x="116" y="850" width="640" height="118" rx="15" fill="#07131f" stroke="#35526f"/>
+  <text x="143" y="883" fill="#a9bfd5" font-family="Segoe UI, Arial, sans-serif" font-size="17">@Duck_Test giao cho @Ngô Thành Trung (Codex)</text>
+  <text x="143" y="916" fill="#cfe2f1" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="650">QA steal A Pet trước Thứ 2 tuần sau nhé</text>
+  <text x="143" y="948" fill="#6f8eaa" font-family="Consolas, monospace" font-size="14">event → message_from_bot_subscriber · source → chatflow</text>
+
+  <text x="815" y="825" fill="#f2f7ff" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="750">Payload sau khi extract</text>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="815" y="850" width="266" height="118" rx="15" fill="#14263b" stroke="#365a79"/>
+    <text x="840" y="882" fill="#79a0bd" font-size="14" font-weight="700" letter-spacing="1">PIC</text>
+    <text x="840" y="918" fill="#e7f4ff" font-size="18" font-weight="700">Ngô Thành Trung</text>
+    <text x="840" y="944" fill="#96b6cf" font-size="14">(Codex)</text>
+    <rect x="1098" y="850" width="266" height="118" rx="15" fill="#14263b" stroke="#365a79"/>
+    <text x="1123" y="882" fill="#79a0bd" font-size="14" font-weight="700" letter-spacing="1">DEADLINE</text>
+    <text x="1123" y="924" fill="#e7f4ff" font-size="18" font-weight="700">Thứ 2 tuần sau</text>
+    <rect x="1381" y="850" width="303" height="118" rx="15" fill="#12332f" stroke="#43cdb5" stroke-opacity="0.55"/>
+    <text x="1406" y="882" fill="#78cbbb" font-size="14" font-weight="700" letter-spacing="1">NỘI DUNG CÔNG VIỆC</text>
+    <text x="1406" y="924" fill="#caffef" font-size="20" font-weight="750">QA steal A Pet</text>
+    <text x="1406" y="950" fill="#78cbbb" font-size="14">Google Sheet · row 5 · WRITTEN</text>
+  </g>
+
+  <!-- Recovery strip -->
+  <text x="116" y="1008" fill="#7d98b3" font-family="Segoe UI, Arial, sans-serif" font-size="14">RECOVERY / TEST PATH</text>
+  <path d="M278 1003 H480" stroke="#7186a4" stroke-width="2" marker-end="url(#arrowMuted)"/>
+  <text x="290" y="1025" fill="#b0bfd0" font-family="Segoe UI, Arial, sans-serif" font-size="14">Chatflow lỗi</text>
+  <text x="494" y="1025" fill="#b0bfd0" font-family="Segoe UI, Arial, sans-serif" font-size="14">Rules fallback</text>
+  <path d="M632 1003 H835" stroke="#7186a4" stroke-width="2" marker-end="url(#arrowMuted)"/>
+  <text x="645" y="1025" fill="#b0bfd0" font-family="Segoe UI, Arial, sans-serif" font-size="14">Sheets paused / auth</text>
+  <text x="850" y="1025" fill="#b0bfd0" font-family="Segoe UI, Arial, sans-serif" font-size="14">Kết nối Google → retry</text>
+  <path d="M1050 1003 H1260" stroke="#7186a4" stroke-width="2" marker-end="url(#arrowMuted)"/>
+  <text x="1070" y="1025" fill="#b0bfd0" font-family="Segoe UI, Arial, sans-serif" font-size="14">/api/test-message</text>
+  <text x="1278" y="1025" fill="#b0bfd0" font-family="Segoe UI, Arial, sans-serif" font-size="14">extract-only, không ghi demo</text>
+
+  <!-- Footer -->
+  <line x1="82" y1="1090" x2="1718" y2="1090" stroke="#47647e" stroke-opacity="0.38"/>
+  <text x="82" y="1132" fill="#6f8aa6" font-family="Consolas, monospace" font-size="14">server.js · src/task-extractor.js · src/google-sheets.js · public/app.js</text>
+  <text x="1718" y="1132" text-anchor="end" fill="#6f8aa6" font-family="Segoe UI, Arial, sans-serif" font-size="14">Alpha Intel · 18/09/2026</text>
+</svg>
