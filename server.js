@@ -282,6 +282,22 @@ async function processTask(record, { skipSheet = false } = {}) {
     updateProcessing(record, { sheet: { status: skipSheet ? "skipped" : "paused" } });
     return;
   }
+
+  const missingRequiredFields = [
+    ["PIC", sheetTask.pic],
+    ["Deadline", sheetTask.deadline],
+    ["Task", sheetTask.task],
+  ].filter(([, value]) => !String(value || "").trim()).map(([field]) => field);
+  if (missingRequiredFields.length) {
+    updateProcessing(record, {
+      sheet: {
+        status: "missing_required_fields",
+        error: `Chưa ghi Google Sheet vì thiếu field bắt buộc: ${missingRequiredFields.join(", ")}.`,
+      },
+    });
+    return;
+  }
+
   if (!googleSheets.isConfigured()) {
     updateProcessing(record, { sheet: { status: "not_configured" } });
     return;

@@ -42,7 +42,7 @@ test("rules provider keeps the message as task content without inventing fields"
   assert.deepEqual(result, {
     pic: null,
     deadline: "25/09/2026",
-    taskContent: "Cần cập nhật dashboard trước 25/09/2026",
+    taskContent: "cập nhật dashboard",
     priority: "P2",
     status: "IN PROGRESS",
     source: "rules",
@@ -81,6 +81,58 @@ test("payload hints extract the assigned email and normalize a natural Vietnames
     pic: "chung@example.com",
     deadline: "19/09/2026",
     taskContent: "lấy snack",
+    status: null,
+  });
+});
+
+test("deadline normalization resolves the nearest future date from partial dates", () => {
+  assert.equal(normalizeDeadline("18/9", "2026-09-19"), "18/09/2027");
+  assert.equal(normalizeDeadline("ngày 18", "2026-09-19"), "18/10/2026");
+  assert.equal(normalizeDeadline("thứ 2 tuần sau", "2026-09-19"), "21/09/2026");
+});
+
+test("payload hints read a date introduced by a completion phrase", () => {
+  const text = "mình sẽ hoàn thành báo cáo vào ngày 18/9";
+  const payload = { event: { sender: { email: "sender@example.com" }, message: { text: { plain_text: text, mentioned_list: [] } } } };
+  assert.equal(extractPayloadHints(text, payload, "2026-09-19").deadline, "18/09/2027");
+});
+
+test("payload hints assign self-owned tasks to the sender email", () => {
+  const text = "@Duck_Test mình sẽ cập nhật dashboard trước ngày 18";
+  const payload = {
+    event: {
+      sender: { email: "sender@example.com" },
+      message: {
+        text: {
+          plain_text: text,
+          mentioned_list: [{ username: "Duck_Test", location: 0, length: 10 }],
+        },
+      },
+    },
+  };
+  assert.equal(extractPayloadHints(text, payload, "2026-09-19").pic, "sender@example.com");
+  assert.equal(extractPayloadHints(text, payload, "2026-09-19").deadline, "18/10/2026");
+});
+
+test("payload hints recognize an explicit self-assignment", () => {
+  const text = "giao cho tôi kiểm tra báo cáo trước ngày 18";
+  const payload = { event: { sender: { email: "sender@example.com" }, message: { text: { plain_text: text, mentioned_list: [] } } } };
+  assert.equal(extractPayloadHints(text, payload, "2026-09-19").pic, "sender@example.com");
+});
+
+test("payload hints support the actual SeaTalk event.email and text.content shape", () => {
+  const text = "Hãy log task cho tôi trước thứ 2 tuần sau phải optimize xong client performance của SAP";
+  const payload = {
+    event: {
+      employee_code: "517816",
+      email: "giabao.tran@garena.vn",
+      message: { text: { content: text } },
+    },
+  };
+  assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
+    pic: "giabao.tran@garena.vn",
+    deadline: "21/09/2026",
+    taskContent: "optimize xong client performance của SAP",
     status: null,
   });
 });

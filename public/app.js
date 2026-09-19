@@ -28,7 +28,7 @@ function processingMarkup(result) {
   const extraction = result.extraction || {};
   const sheet = result.sheet || {};
   const extractionLabels = { queued: "Đang xếp hàng", extracting: "Đang trích xuất", rules: "Rule fallback", complete: "Đã trích xuất", failed: "Lỗi" };
-  const sheetLabels = { queued: "Chờ ghi", writing: "Đang ghi", written: "Đã ghi vào Sheet", skipped: "Bỏ qua khi test", paused: "Tạm thời bỏ qua", not_configured: "Chưa cấu hình", auth_required: "Cần kết nối Google", failed: "Ghi lỗi", not_attempted: "Chưa ghi" };
+  const sheetLabels = { queued: "Chờ ghi", writing: "Đang ghi", written: "Đã ghi vào Sheet", skipped: "Bỏ qua khi test", paused: "Tạm thời bỏ qua", missing_required_fields: "Thiếu field bắt buộc", not_configured: "Chưa cấu hình", auth_required: "Cần kết nối Google", failed: "Ghi lỗi", not_attempted: "Chưa ghi" };
   const extractionStatus = extraction.status || "queued";
   const sheetStatus = sheet.status || "queued";
   const value = (field) => field ? escapeHtml(field) : "—";
