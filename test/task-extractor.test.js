@@ -89,6 +89,7 @@ test("deadline normalization resolves the nearest future date from partial dates
   assert.equal(normalizeDeadline("18/9", "2026-09-19"), "18/09/2027");
   assert.equal(normalizeDeadline("ngày 18", "2026-09-19"), "18/10/2026");
   assert.equal(normalizeDeadline("thứ 2 tuần sau", "2026-09-19"), "21/09/2026");
+  assert.equal(normalizeDeadline("trong tuần sau", "2026-09-19"), "25/09/2026");
 });
 
 test("payload hints read a date introduced by a completion phrase", () => {
@@ -133,6 +134,30 @@ test("payload hints support the actual SeaTalk event.email and text.content shap
     pic: "giabao.tran@garena.vn",
     deadline: "21/09/2026",
     taskContent: "optimize xong client performance của SAP",
+    status: null,
+  });
+});
+
+test("payload hints choose the mentioned assignee from the actual group-chat shape", () => {
+  const text = "@Duck_Test Hãy log task cho @Chung Anh (Lemon) 🍋 trước thứ 2 tuần sau phải optimize xong client performance của Dig";
+  const payload = {
+    event: {
+      message: {
+        sender: { email: "giabao.tran@garena.vn" },
+        text: {
+          plain_text: text,
+          mentioned_list: [
+            { username: "Duck_Test", email: "", location: 0, length: 10 },
+            { username: "Chung Anh (Lemon) 🍋", email: "chunganh.nguyenthi_ctv@garena.vn", location: 29, length: 21 },
+          ],
+        },
+      },
+    },
+  };
+  assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
+    pic: "chunganh.nguyenthi_ctv@garena.vn",
+    deadline: "21/09/2026",
+    taskContent: "Hãy log task cho phải optimize xong client performance của Dig",
     status: null,
   });
 });

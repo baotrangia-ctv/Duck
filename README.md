@@ -40,6 +40,14 @@ Khi nhận `message_from_bot_subscriber` (hoặc event message tương đương)
 
 Dashboard cũng hiển thị payload sau extract. ID được tính bằng `max(ID hiện có) + 1`; các lần ghi được serialize để tránh cấp trùng ID khi có nhiều event đồng thời. Flow hiện tại không hỏi xác nhận, không gọi `Tao_cong_viec`, không lên lịch reminder và không escalation.
 
+Các rule extract được tách thành file Markdown để dễ chỉnh sửa:
+
+- rules/PIC_POLICY.md — cách xác định PIC và email người gửi/người được mention.
+- rules/DEADLINE_POLICY.md — cách quy đổi ngày tương đối thành DD/MM/YYYY.
+- rules/TASK_PRIORITY_POLICY.md — quy ước P0/P1/P2.
+
+Server đọc các file này khi khởi động và ghép chúng vào EXTRACTION_PROMPT; sau khi sửa rule cần restart server.
+
 Mặc định `TASK_EXTRACTOR=auto` sẽ ưu tiên Chatflow đang có của project, sau đó dùng Compass LLM giống project `Claude`. Nếu chưa cấu hình AI, parser vẫn xử lý được tin nhắn có nhãn rõ ràng như `PIC: an@example.com; deadline: 30/09; nội dung công việc: cập nhật dashboard`.
 
 Đặt các biến Google Sheets và OAuth trong `.env`:
