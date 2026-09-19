@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
+import { SeaTalkClient, buildConfirmationMessage, buildTaskAssignmentMessage } from "../src/seatalk.js";
 
 test("parseTaskFields reads and normalizes the required JSON fields", () => {
   const result = parseTaskFields('{"pic":"an@example.com","deadline":"30/09","task":"Cập nhật dashboard","status":"DONE"}', "2026-09-19");
@@ -229,4 +230,127 @@ test("Google Sheets client builds an OAuth authorization URL", () => {
   assert.equal(url.searchParams.get("redirect_uri"), "http://localhost:3030/auth/google/callback");
   assert.equal(url.searchParams.get("state"), "csrf-state");
   assert.equal(url.searchParams.get("access_type"), "offline");
+});
+
+test("rules extractor preserves draft context when a user only changes the deadline", async () => {
+  const extractor = createTaskExtractor({ provider: "rules" });
+  const result = await extractor.extract("đổi deadline sang 30/09/2026", {
+    event: { email: "an@example.com", message: { text: { content: "đổi deadline sang 30/09/2026" } } },
+  }, {
+    context: {
+      fields: {
+        pic: "an@example.com",
+        taskContent: "Cập nhật dashboard",
+        deadline: "25/09/2026",
+        priority: "P2",
+        status: "IN PROGRESS",
+      },
+      history: ["giao cho tôi cập nhật dashboard trước 25/09/2026"],
+    },
+  });
+  assert.deepEqual(result, {
+    pic: "an@example.com",
+    deadline: "30/09/2026",
+    taskContent: "Cập nhật dashboard",
+    priority: "P2",
+    status: "IN PROGRESS",
+    source: "rules",
+  });
+});
+
+test("rules extractor changes only priority when a user only changes priority", async () => {
+  const extractor = createTaskExtractor({ provider: "rules" });
+  const result = await extractor.extract("Priority phải là P1", {
+    event: { email: "an@example.com", message: { text: { content: "Priority phải là P1" } } },
+  }, {
+    context: {
+      fields: {
+        pic: "an@example.com",
+        taskContent: "Cập nhật dashboard",
+        deadline: "25/09/2026",
+        priority: "P2",
+        status: "IN PROGRESS",
+      },
+      history: ["giao cho tôi cập nhật dashboard trước 25/09/2026"],
+    },
+  });
+  assert.deepEqual(result, {
+    pic: "an@example.com",
+    deadline: "25/09/2026",
+    taskContent: "Cập nhật dashboard",
+    priority: "P1",
+    status: "IN PROGRESS",
+    source: "rules",
+  });
+});
+
+test("rules extractor accepts deadline là Thứ 2 without resetting other fields", async () => {
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-09-19" });
+  const result = await extractor.extract("deadline là Thứ 2", {
+    event: { email: "an@example.com", message: { text: { content: "deadline là Thứ 2" } } },
+  }, {
+    context: {
+      fields: {
+        pic: "an@example.com",
+        taskContent: "Cập nhật dashboard",
+        deadline: "25/09/2026",
+        priority: "P1",
+        status: "IN PROGRESS",
+      },
+      history: ["priority P1 cho task cập nhật dashboard"],
+    },
+  });
+  assert.deepEqual(result, {
+    pic: "an@example.com",
+    deadline: "21/09/2026",
+    taskContent: "Cập nhật dashboard",
+    priority: "P1",
+    status: "IN PROGRESS",
+    source: "rules",
+  });
+});
+
+test("SeaTalk client sends a confirmation card to a single-chat recipient", async () => {
+  const requests = [];
+  const client = new SeaTalkClient({
+    accessToken: "access-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ code: 0, message_id: "card-1" }) };
+    },
+  });
+  await client.sendConfirmation({ employeeCode: "517816" }, {
+    task: "Cập nhật dashboard",
+    pic: "an@example.com",
+    deadline: "30/09/2026",
+    priority: "P1",
+  }, "task:confirm:draft-1");
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://openapi.seatalk.io/messaging/v2/single_chat");
+  const body = JSON.parse(requests[0].options.body);
+  assert.equal(body.employee_code, "517816");
+  assert.equal(body.message.tag, "interactive_message");
+  assert.equal(body.message.interactive_message.elements[2].button.value, "task:confirm:draft-1");
+  assert.match(body.message.interactive_message.elements[1].description.text, /PIC: an@example.com/);
+  assert.match(body.message.interactive_message.elements[1].description.text, /Deadline: 30\/09\/2026/);
+  assert.equal(buildConfirmationMessage({ task: "x" }, "v").tag, "interactive_message");
+});
+
+test("SeaTalk builds a direct PIC assignment notification", () => {
+  const message = buildTaskAssignmentMessage({
+    task: "Cập nhật dashboard",
+    pic: "an@example.com",
+    deadline: "30/09/2026",
+    priority: "P1",
+    status: "IN PROGRESS",
+  });
+
+  assert.equal(message.tag, "text");
+  assert.match(message.text.content, /Task đã được xác nhận và ghi nhận/);
+  assert.match(message.text.content, /PIC: an@example.com/);
+  assert.match(message.text.content, /Nội dung Task: Cập nhật dashboard/);
+  assert.match(message.text.content, /Deadline: 30\/09\/2026/);
+  assert.match(message.text.content, /Priority: P1/);
+  assert.match(message.text.content, /Status: IN PROGRESS/);
 });

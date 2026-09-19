@@ -271,6 +271,47 @@ class GoogleSheetsClient {
       rowNumber: rowMatch ? Number(rowMatch[1]) : null,
     };
   }
+
+  async updateTask(rowNumber, task) {
+    const operation = this.appendQueue.then(() => this._updateTask(rowNumber, task));
+    this.appendQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async _updateTask(rowNumber, task) {
+    if (!this.isConfigured()) {
+      throw new Error("Google Sheets OAuth chưa được cấu hình");
+    }
+    if (!Number.isInteger(Number(rowNumber)) || Number(rowNumber) < 2) {
+      throw new Error("Không xác định được dòng task cần update trong Google Sheet");
+    }
+
+    const token = await this.getAccessToken();
+    const row = Number(rowNumber);
+    const range = `${this.sheetName}!A${row}:H${row}`;
+    const endpoint = `${SHEETS_API}/${encodeURIComponent(this.spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+    const response = await fetch(endpoint, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        majorDimension: "ROWS",
+        values: buildTaskRow({ ...task, id: task.id ?? task.taskId }),
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Google Sheets HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
+    }
+
+    const data = await response.json();
+    return {
+      taskId: task.id ?? task.taskId ?? null,
+      updatedRange: data.updatedRange || range,
+      rowNumber: row,
+    };
+  }
 }
 
 export { GoogleSheetsClient, buildTaskRow, columnLetter, normalizeSpreadsheetId };

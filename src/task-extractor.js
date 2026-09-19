@@ -336,7 +336,7 @@ function extractLabeledFields(text, referenceDate = getReferenceDate(), holidayD
   return {
     pic: normalizePic(firstLabeledValue(value, ["PIC", "người phụ trách", "phụ trách"])),
     deadline: normalizeDeadline(rawDeadline, referenceDate, holidayDates) || deadlineFromPriority(priority, referenceDate),
-    taskContent: firstLabeledValue(value, ["nội dung công việc", "task content", "công việc"]),
+    taskContent: firstLabeledValue(value, ["nội dung công việc", "task content", "công việc"]) || extractExplicitTaskContent(value),
     priority,
     status: normalizeStatus(firstLabeledValue(value, ["status", "trạng thái"])),
   };
@@ -375,12 +375,19 @@ function cleanHintText(value) {
 function extractDeadlineText(value) {
   const deadlineExpression = "(?:\\d{1,2}(?::\\d{2})?\\s*(?:giờ|h)\\s*(?:sáng|trưa|chiều|tối)?\\s*(?:hôm nay|nay|today)|hôm nay|ngày mai|ngày\\s+\\d{1,2}|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)(?:\\s+(?:tuần\\s+(?:sau|tới)|next\\s+week))?|\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2})";
   const prefix = "(?:deadline|hạn(?: chót| hoàn thành)?|due date|trước|(?:hoàn thành|hoàn tất)\\s+(?:vào\\s+)?ngày|vào\\s+ngày)";
+  const revision = String(value || "").match(new RegExp(`(?:đổi|sửa|update|cập nhật|thay)\\s+${prefix}\\s*(?:(?:sang|thành|là|to)\\s*)?(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
+  if (revision) return cleanHintText(revision[1]);
   const standalone = String(value || "").match(/\b(?:trong\s+)?(?:tuần\s+sau\s+nữa|hai\s+tuần\s+tới|tuần\s+(?:sau|tới|này|trước))\b/i);
   if (standalone && /\b(?:thứ\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|thu\s+(?:[2-7]|hai|ba|tư|nam|sau|bay))\s*$/i.test(String(value || "").slice(0, standalone.index))) {
     return cleanHintText(String(value || "").match(new RegExp(`(${deadlineExpression})`, "i"))?.[1]);
   }
   if (standalone) return cleanHintText(standalone[0]);
-  const match = String(value || "").match(new RegExp(`${prefix}\\s*[:=-]?\\s*(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
+  const match = String(value || "").match(new RegExp(`${prefix}\\s*(?:(?:là|sang|thành|vào|trước)\\s*)?[:=-]?\\s*(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
+  return cleanHintText(match?.[1]);
+}
+
+function extractExplicitTaskContent(value) {
+  const match = String(value || "").match(/(?:nội dung(?:\s+(?:task|công việc))?|task(?:\s+content)?|công việc)\s*(?::|=|\b(?:là|thành)\b)\s*(.+)$/i);
   return cleanHintText(match?.[1]);
 }
 
@@ -414,7 +421,7 @@ function extractPayloadHints(text, payload, referenceDate = getReferenceDate(), 
   taskContent = taskContent.normalize("NFC")
     .replace(/^\s*(?:giao cho|phụ trách|log\s+task\s+cho|(?:tạo|tao|ghi)\s+(?:task|công việc)\s+cho|assigned to|assign to)\s+/i, "")
     .replace(/^\s*(?:hãy|hay)\s+(?:log|ghi|tạo)\s+(?:task|công việc)\s+(?:cho\s+)?(?:tôi|mình|em)\s+/i, "")
-    .replace(new RegExp(`\\s*${"(?:deadline|hạn(?: chót| hoàn thành)?|due date|trước|(?:hoàn thành|hoàn tất)\\s+(?:vào\\s+)?ngày|vào\\s+ngày)"}\\s*[:=-]?\\s*${"(?:hôm nay|ngày mai|ngày\\s+\\d{1,2}|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)(?:\\s+(?:tuần\\s+(?:sau|tới)|next\\s+week))?|\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2})"}(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"), " ")
+    .replace(new RegExp(`\\s*${"(?:deadline|hạn(?: chót| hoàn thành)?|due date|trước|(?:hoàn thành|hoàn tất)\\s+(?:vào\\s+)?ngày|vào\\s+ngày)"}\\s*(?:(?:là|sang|thành|vào|trước)\\s*)?[:=-]?\\s*${"(?:hôm nay|ngày mai|ngày\\s+\\d{1,2}|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)(?:\\s+(?:tuần\\s+(?:sau|tới)|next\\s+week))?|\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2})"}(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"), " ")
     .replace(/\s*trước\s+(?:\d{1,2}(?::\d{2})?\s*(?:giờ|h)\s*(?:sáng|trưa|chiều|tối)?\s*(?:hôm nay|nay|today))(?=\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\b))/i, " ")
     .replace(/\s+(?:(?:trong\s+)?(?:tuần\s+sau\s+nữa|hai\s+tuần\s+tới|tuần\s+(?:sau|tới|này|trước)))(?:\s+nhé)?\b/i, " ")
     .replace(/^\s*(?:phải|cần|sẽ)\s+/i, "")
@@ -446,6 +453,84 @@ function mergeFields(primary, fallback) {
     priority: primary.priority || fallback.priority || null,
     status: primary.status || fallback.status || null,
   };
+}
+
+function hasExplicitTaskRevision(text) {
+  const value = String(text || "").normalize("NFC");
+  return /(?:nội dung(?:\s+(?:task|công việc))?|task(?:\s+content)?|công việc)\s*[:=-]/i.test(value) ||
+    /(?:đổi|sửa|update|cập nhật|thay)\s+(?:lại\s+)?(?:nội dung|task|công việc)\b/i.test(value) ||
+    /(?:task|công việc|nội dung)\b[\s\S]{0,60}\b(?:thành|là)\b/i.test(value);
+}
+
+function hasExplicitDeadlineSignal(text) {
+  const value = String(text || "").normalize("NFC");
+  return Boolean(extractDeadlineText(value)) ||
+    /\b(?:deadline|hạn(?: chót| hoàn thành)?|due date)\b\s*(?:(?:là|sang|thành|vào|trước)\s*)?(?:\d{1,2}[/.\-]\d{1,2}(?:[/.\-]\d{2,4})?|thứ\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|hôm nay|ngày mai)\b/i.test(value);
+}
+
+function hasExplicitPrioritySignal(text) {
+  return /\b(?:p0|p1|p2|priority|mức độ ưu tiên|độ ưu tiên|ưu tiên|khẩn cấp|rất gấp|urgent|asap|quan trọng|important)\b/i.test(String(text || "").normalize("NFC"));
+}
+
+function hasExplicitPicSignal(text, payload) {
+  const mentions = getPayloadMentions(payload);
+  const hasAssigneeMention = mentions.some((mention) => Number.isInteger(mention.location) && mention.location > 0);
+  return hasAssigneeMention || /\b(?:pic|người phụ trách|phụ trách|giao cho|assigned to|assign to)\b/i.test(String(text || "").normalize("NFC"));
+}
+
+function hasExplicitStatusSignal(text) {
+  return /\b(?:status|trạng thái|done|hoàn thành|đã xong|not do|không làm|in progress|đang làm)\b/i.test(String(text || "").normalize("NFC"));
+}
+
+function revisionSignals(text, payload) {
+  return {
+    pic: hasExplicitPicSignal(text, payload),
+    deadline: hasExplicitDeadlineSignal(text),
+    taskContent: hasExplicitTaskRevision(text),
+    priority: hasExplicitPrioritySignal(text),
+    status: hasExplicitStatusSignal(text),
+  };
+}
+
+function contextFields(context) {
+  if (!context || typeof context !== "object") return null;
+  const fields = context.fields && typeof context.fields === "object" ? context.fields : context;
+  return {
+    pic: asText(fields.pic),
+    deadline: asText(fields.deadline),
+    taskContent: asText(fields.taskContent || fields.task),
+    priority: normalizePriority(fields.priority),
+    status: normalizeStatus(fields.status || fields.taskStatus),
+  };
+}
+
+function mergeRevisionFields(fields, context, text, payload) {
+  const previous = contextFields(context);
+  if (!previous) return fields;
+  const signals = revisionSignals(text, payload);
+  const updates = {
+    pic: signals.pic ? fields.pic : null,
+    deadline: signals.deadline ? fields.deadline : null,
+    taskContent: signals.taskContent ? fields.taskContent : null,
+    priority: signals.priority ? fields.priority : null,
+    status: signals.status ? fields.status : null,
+  };
+  return mergeFields(updates, previous);
+}
+
+function contextInstructions(context) {
+  const previous = contextFields(context);
+  if (!previous) return "";
+  const history = Array.isArray(context?.history)
+    ? context.history.filter((item) => typeof item === "string" && item.trim()).slice(-6)
+    : [];
+  return `
+
+ĐÂY LÀ YÊU CẦU CẬP NHẬT DRAFT ĐANG CÓ.
+Draft hiện tại:
+${JSON.stringify(previous)}
+${history.length ? `Các tin nhắn gần đây trong cùng thread:\n${history.map((item) => `- ${item}`).join("\n")}` : ""}
+Hãy giữ nguyên field không được yêu cầu thay đổi. Chỉ thay field mà tin nhắn mới yêu cầu. Kết quả vẫn phải là JSON đầy đủ theo schema.`;
 }
 
 function finalizeFields(fields, referenceDate, holidayDates) {
@@ -499,10 +584,12 @@ function createTaskExtractor({
   compassApiKey = "",
   compassModel = "compass-max",
   holidayDates = "",
+  referenceDate = "",
 } = {}) {
   const selectedProvider = String(provider || "auto").toLowerCase();
   const chatflowConfigured = Boolean(chatflowUrl && chatflowToken);
   const compassConfigured = Boolean(compassBaseUrl && compassApiKey);
+  const extractionReferenceDate = asText(referenceDate) || getReferenceDate();
 
   function providerName() {
     if (selectedProvider === "rules") return "rules";
@@ -513,7 +600,7 @@ function createTaskExtractor({
     return "rules";
   }
 
-  async function callChatflow(text, payload) {
+  async function callChatflow(text, payload, context) {
     const response = await fetch(chatflowUrl, {
       method: "POST",
       headers: {
@@ -522,7 +609,7 @@ function createTaskExtractor({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `${EXTRACTION_PROMPT}\n\nNgày tham chiếu theo múi giờ Asia/Ho_Chi_Minh: ${getReferenceDate()}\n\nNội dung tin nhắn:\n${text}\n\nPayload gốc:\n${JSON.stringify(payload)}`,
+         query: `${EXTRACTION_PROMPT}\n\nNgày tham chiếu theo múi giờ Asia/Ho_Chi_Minh: ${extractionReferenceDate}${contextInstructions(context)}\n\nNội dung tin nhắn mới:\n${text}\n\nPayload gốc:\n${JSON.stringify(payload)}`,
       }),
     });
     if (!response.ok) {
@@ -531,7 +618,7 @@ function createTaskExtractor({
     return readChatflowResponse(response);
   }
 
-  async function callCompass(text, payload) {
+  async function callCompass(text, payload, context) {
     const response = await fetch(`${compassBaseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
@@ -542,7 +629,7 @@ function createTaskExtractor({
         model: compassModel,
         temperature: 0,
         messages: [
-          { role: "system", content: `${EXTRACTION_PROMPT}\n\nNgày tham chiếu theo múi giờ Asia/Ho_Chi_Minh: ${getReferenceDate()}` },
+           { role: "system", content: `${EXTRACTION_PROMPT}\n\nNgày tham chiếu theo múi giờ Asia/Ho_Chi_Minh: ${extractionReferenceDate}${contextInstructions(context)}` },
           { role: "user", content: `${text}\n\nPayload metadata: ${JSON.stringify(payload)}` },
         ],
       }),
@@ -554,37 +641,36 @@ function createTaskExtractor({
     return data?.choices?.[0]?.message?.content || "";
   }
 
-  async function extract(text, payload) {
-    const referenceDate = getReferenceDate();
-    const fallback = extractLabeledFields(text, referenceDate, holidayDates);
-    const payloadHints = extractPayloadHints(text, payload, referenceDate, holidayDates);
+  async function extract(text, payload, { context = null } = {}) {
+    const fallback = extractLabeledFields(text, extractionReferenceDate, holidayDates);
+    const payloadHints = extractPayloadHints(text, payload, extractionReferenceDate, holidayDates);
     const inferredPriority = inferPriorityFromText(text);
     const activeProvider = providerName();
 
     if (activeProvider === "rules") {
       const fields = mergeFields(payloadHints, mergeFields(fallback, { pic: null, deadline: null, taskContent: text, priority: inferredPriority, status: null }));
-      return { ...finalizeFields(fields, referenceDate, holidayDates), source: "rules" };
+      return { ...finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates), source: "rules" };
     }
 
     const content = activeProvider === "chatflow"
-      ? await callChatflow(text, payload)
-      : await callCompass(text, payload);
+      ? await callChatflow(text, payload, context)
+      : await callCompass(text, payload, context);
 
-    const parsed = parseTaskFields(content, referenceDate, holidayDates);
+    const parsed = parseTaskFields(content, extractionReferenceDate, holidayDates);
     let fields = mergeFields(payloadHints, mergeFields(parsed, {
       ...fallback,
       priority: fallback.priority || inferredPriority,
-      taskContent: fallback.taskContent || asText(text),
+      taskContent: context && !hasExplicitTaskRevision(text) ? null : fallback.taskContent || asText(text),
     }));
     const hasExplicitDeadline = Boolean(payloadHints.deadline || fallback.deadline);
     if (!hasExplicitDeadline && inferredPriority) {
       fields = {
         ...fields,
         priority: inferredPriority,
-        deadline: deadlineFromPriority(inferredPriority, referenceDate),
+        deadline: deadlineFromPriority(inferredPriority, extractionReferenceDate),
       };
     }
-    return { ...finalizeFields(fields, referenceDate, holidayDates), source: activeProvider };
+    return { ...finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates), source: activeProvider };
   }
 
   return {

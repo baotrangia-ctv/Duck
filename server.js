@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { createTaskExtractor } from "./src/task-extractor.js";
 import { GoogleSheetsClient } from "./src/google-sheets.js";
+import { SeaTalkClient, buildConfirmationMessage, buildConfirmationText, buildTaskAssignmentMessage } from "./src/seatalk.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(root, "public");
@@ -20,7 +21,14 @@ function loadEnvFile() {
 
 loadEnvFile();
 const port = Number.parseInt(process.env.PORT || "3030", 10);
+const host = process.env.HOST || "0.0.0.0";
 const signingSecret = process.env.SEATALK_SIGNING_SECRET || "";
+const seatalk = new SeaTalkClient({
+  appId: process.env.SEATALK_APP_ID || "",
+  appSecret: process.env.SEATALK_APP_SECRET || "",
+  accessToken: process.env.SEATALK_ACCESS_TOKEN || "",
+  baseUrl: process.env.SEATALK_API_BASE_URL || "https://openapi.seatalk.io",
+});
 const chatflowUrl = process.env.CHATFLOW_API_URL || "";
 const chatflowToken = process.env.CHATFLOW_API_TOKEN || "";
 const googleSheetsWriteEnabled = String(process.env.GOOGLE_SHEETS_WRITE_ENABLED || "false").toLowerCase() === "true";
@@ -48,6 +56,8 @@ const maxMessages = 100;
 const messages = [];
 const clients = new Set();
 const oauthStates = new Map();
+const conversations = new Map();
+const confirmationDrafts = new Map();
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -118,7 +128,7 @@ function parseSeaTalkEvent(payload) {
   const eventType = payload?.event_type || "unknown";
   const event = payload?.event || {};
   const message = event?.message || payload?.message || {};
-  const sender = event?.sender || event?.user || event?.from || {};
+  const sender = event?.sender || event?.user || event?.from || message?.sender || {};
   const text =
     message?.text?.content ||
     message?.text?.plain_text ||
@@ -128,6 +138,20 @@ function parseSeaTalkEvent(payload) {
     event?.text?.plain_text ||
     event?.content ||
     "";
+
+  if (eventType === "interactive_message_click") {
+    const clicker = event?.clicker || event?.sender || event?.user || {};
+    return {
+      kind: "interaction",
+      title: `Bấm nút ${event?.button_value || event?.value || "interactive"}`,
+      sender: clicker.name || clicker.employee_code || clicker.seatalk_id || "Không rõ người dùng",
+      senderId: clicker.seatalk_id || clicker.employee_code || event?.employee_code || null,
+      employeeCode: clicker.employee_code || event?.employee_code || null,
+      messageId: event?.message_id || event?.message?.message_id || null,
+      buttonValue: event?.button_value || event?.value || event?.button?.value || "",
+      eventType,
+    };
+  }
 
   if ([
     "message_from_bot_subscriber",
@@ -145,6 +169,7 @@ function parseSeaTalkEvent(payload) {
       employeeCode: sender.employee_code || event.employee_code || null,
       messageId,
       groupId: event.group_id || event.group?.group_id || null,
+      threadId: event.thread_id || message.thread_id || event.thread?.thread_id || message.thread?.thread_id || (event.group_id || event.group?.group_id ? messageId : null),
       messageType: message.tag || "text",
       eventType,
     };
@@ -170,13 +195,6 @@ function parseSeaTalkEvent(payload) {
 }
 
 function initialProcessingState() {
-  const sheetStatus = !googleSheetsWriteEnabled
-    ? "paused"
-    : !googleSheets.isConfigured()
-      ? "not_configured"
-      : !googleSheets.isAuthorized()
-        ? "auth_required"
-        : "queued";
   return {
     extraction: {
       status: taskExtractor.configured ? "queued" : "rules",
@@ -194,10 +212,16 @@ function initialProcessingState() {
       error: "",
     },
     sheet: {
-      status: sheetStatus,
+      status: "awaiting_confirmation",
       rowNumber: null,
       updatedRange: "",
-      error: sheetStatus === "auth_required" ? "Chưa kết nối Google" : "",
+      error: "",
+    },
+    confirmation: {
+      status: "queued",
+      draftId: null,
+      messageId: null,
+      error: "",
     },
   };
 }
@@ -230,116 +254,362 @@ function updateProcessing(record, patch) {
     ...patch,
     extraction: { ...record.processing.extraction, ...(patch.extraction || {}) },
     sheet: { ...record.processing.sheet, ...(patch.sheet || {}) },
+    confirmation: { ...record.processing.confirmation, ...(patch.confirmation || {}) },
   };
   broadcast({ type: "processing", id: record.id, processing: record.processing });
 }
 
-async function processTask(record, { skipSheet = false } = {}) {
-  updateProcessing(record, {
-    extraction: { status: taskExtractor.configured ? "extracting" : "rules", error: "" },
-    sheet: { status: skipSheet ? "skipped" : record.processing.sheet.status, error: "" },
+function conversationKey(parsed) {
+  if (parsed?.groupId) return `group:${parsed.groupId}:thread:${parsed.threadId || parsed.messageId || "unknown"}`;
+  if (parsed?.employeeCode) return `single:${parsed.employeeCode}`;
+  if (parsed?.senderId) return `sender:${parsed.senderId}`;
+  return null;
+}
+
+function isConfirmRequest(text) {
+  return /^(?:\s*@[^\s]+\s*)?(?:confirm|xác\s+nhận|ok|đồng\s+ý)\s*[.!]?\s*$/i.test(String(text || "").trim());
+}
+
+function isDraftRevisionRequest(text) {
+  const value = String(text || "").normalize("NFC").trim();
+  if (!value || isConfirmRequest(value)) return false;
+  if (/\b(?:tạo|tao|create|new)\s+(?:task|công việc)\b/i.test(value)) return false;
+  const fieldMentioned = /\b(?:priority|p0|p1|p2|ưu tiên|mức độ ưu tiên|độ ưu tiên|deadline|hạn(?: chót| hoàn thành)?|due date|pic|người phụ trách|phụ trách|giao cho|status|trạng thái)\b/i.test(value);
+  const revisionLanguage = /\b(?:chỉnh|chinh|đổi|doi|sửa|sua|update|cập nhật|cap nhat|thay|set|change|thành|là|sang|về|to)\b/i.test(value);
+  return fieldMentioned && revisionLanguage;
+}
+
+function conversationTarget(parsed, existing = null) {
+  return {
+    groupId: parsed?.groupId || existing?.target?.groupId || null,
+    employeeCode: parsed?.employeeCode || existing?.target?.employeeCode || null,
+    threadId: parsed?.threadId || existing?.target?.threadId || null,
+  };
+}
+
+function normalizeEmail(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text && text.includes("@") ? text : null;
+}
+
+function resolvePicEmployeeCode(record, draft, conversation) {
+  const payload = record?.payload || {};
+  const message = payload?.event?.message || payload?.message || {};
+  const sender = message?.sender || payload?.event?.sender || payload?.sender || {};
+  const draftPic = normalizeEmail(draft?.pic);
+  const senderEmail = normalizeEmail(sender.email || sender.user_email || sender.email_address);
+  const senderEmployeeCode = sender.employee_code || sender.employeeCode || null;
+  const mentions = Array.isArray(message?.text?.mentioned_list) ? message.text.mentioned_list : [];
+  const nonRoutingMentions = mentions.filter((mention) => Number.isInteger(mention?.location) && mention.location > 0);
+  const matchingMention = nonRoutingMentions.find((mention) => {
+    const mentionEmail = normalizeEmail(mention.email || mention.user_email || mention.email_address);
+    return mention.employee_code && (mentionEmail === draftPic || nonRoutingMentions.length === 1);
   });
 
-  let fields;
-  try {
-    fields = await taskExtractor.extract(record.parsed.text, record.payload);
-  } catch (error) {
-    updateProcessing(record, {
-      extraction: { status: "failed", error: error.message },
-      sheet: { status: "not_attempted" },
-    });
-    return;
-  }
+  if (matchingMention?.employee_code) return matchingMention.employee_code;
+  if (conversation?.picEmployeeCode) return conversation.picEmployeeCode;
+  if (senderEmployeeCode && (!draftPic || senderEmail === draftPic)) return senderEmployeeCode;
+  return null;
+}
 
-  const createdAt = record.processing?.extraction?.createdAt || record.timestamp || record.receivedAt;
-  const updatedAt = record.processing?.extraction?.updatedAt || createdAt;
-  const taskStatus = fields.status || record.processing?.extraction?.taskStatus || "IN PROGRESS";
-  const sheetTask = {
+function findRelatedConversation(record, key) {
+  const parsed = record.parsed;
+  if (!parsed?.groupId || !isDraftRevisionRequest(parsed.text)) return null;
+
+  const candidates = [...new Set(conversations.values())]
+    .filter((conversation) => conversation.key !== key)
+    .filter((conversation) => conversation.fields && !conversation.written)
+    .filter((conversation) => conversation.target?.groupId === parsed.groupId)
+    .filter((conversation) => !parsed.employeeCode || !conversation.target?.employeeCode || conversation.target.employeeCode === parsed.employeeCode)
+    .sort((a, b) => String(b.lastActivityAt || b.createdAt || "").localeCompare(String(a.lastActivityAt || a.createdAt || "")));
+
+  return candidates[0] || null;
+}
+
+function createConversation(record) {
+  const key = conversationKey(record.parsed);
+  if (!key) return null;
+  const existing = conversations.get(key);
+  if (existing) {
+    existing.target = conversationTarget(record.parsed, existing);
+    existing.lastActivityAt = record.timestamp || record.receivedAt;
+    return existing;
+  }
+  const related = findRelatedConversation(record, key);
+  if (related) {
+    conversations.set(key, related);
+    related.key = key;
+    related.target = conversationTarget(record.parsed, related);
+    related.lastActivityAt = record.timestamp || record.receivedAt;
+    return related;
+  }
+  const conversation = {
+    key,
+    draftId: `draft-${randomBytes(12).toString("hex")}`,
+    target: conversationTarget(record.parsed),
+    fields: null,
+    history: [],
+    recordId: record.id,
+    createdAt: record.timestamp || record.receivedAt,
+    rowNumber: null,
+    taskId: null,
+    confirmationValue: null,
+    confirmationMessageId: null,
+    picEmployeeCode: null,
+    written: false,
+    lastActivityAt: record.timestamp || record.receivedAt,
+  };
+  conversations.set(key, conversation);
+  return conversation;
+}
+
+function draftFromFields(fields, conversation, record) {
+  const createdAt = conversation.createdAt || record.timestamp || record.receivedAt;
+  return {
     task: fields.taskContent,
     pic: fields.pic,
     deadline: fields.deadline,
     priority: fields.priority,
-    status: taskStatus,
+    status: fields.status || "IN PROGRESS",
     createdAt,
-    updatedAt,
+    updatedAt: new Date().toISOString(),
   };
+}
+
+function missingRequiredFields(task) {
+  return [
+    ["PIC", task.pic],
+    ["Deadline", task.deadline],
+    ["Task", task.task],
+  ].filter(([, value]) => !String(value || "").trim()).map(([field]) => field);
+}
+
+async function sendConfirmationCard(record, conversation, draft, { skipSend = false } = {}) {
+  if (conversation.confirmationValue) confirmationDrafts.delete(conversation.confirmationValue);
+  conversation.confirmationValue = null;
+
+  if (skipSend || !record.parsed.groupId && !record.parsed.employeeCode) {
+    updateProcessing(record, {
+      sheet: { status: skipSend ? "skipped" : "awaiting_confirmation" },
+      confirmation: { status: "not_attempted", draftId: conversation.draftId, messageId: null },
+    });
+    return;
+  }
+  if (!seatalk.isConfigured()) {
+    updateProcessing(record, {
+      confirmation: {
+        status: "not_configured",
+        draftId: conversation.draftId,
+        error: "Chưa cấu hình SEATALK_APP_ID/SEATALK_APP_SECRET hoặc SEATALK_ACCESS_TOKEN để gửi card Confirm.",
+      },
+    });
+    return;
+  }
+
+  const confirmationValue = `task:confirm:${conversation.draftId}`;
+  conversation.confirmationValue = confirmationValue;
+  confirmationDrafts.set(confirmationValue, {
+    key: conversation.key,
+    recordId: record.id,
+    draftId: conversation.draftId,
+  });
+
+  updateProcessing(record, { confirmation: { status: "sending", draftId: conversation.draftId, error: "" } });
+  try {
+    let result;
+    let confirmationStatus = "sent";
+    let confirmationError = "";
+    if (conversation.target.groupId) {
+      result = await seatalk.sendGroupChat(
+        conversation.target.groupId,
+        buildConfirmationText(draft),
+        conversation.target.threadId,
+      );
+      if (conversation.target.employeeCode) {
+        try {
+          const directResult = await seatalk.sendSingleChat(
+            conversation.target.employeeCode,
+            buildConfirmationMessage(draft, confirmationValue),
+          );
+          result = directResult || result;
+        } catch (error) {
+          confirmationStatus = "sent_text_fallback";
+          confirmationError = `Card Confirm không gửi được vào chat riêng (${error.message}). Có thể reply Confirm trong thread.`;
+        }
+      } else {
+        confirmationStatus = "sent_text_fallback";
+        confirmationError = "Không lấy được employee_code người gửi để gửi card Confirm riêng. Reply Confirm trong thread.";
+      }
+    } else {
+      result = await seatalk.sendConfirmation(conversation.target, draft, confirmationValue);
+    }
+    conversation.confirmationMessageId = result?.message_id || null;
+    updateProcessing(record, {
+      confirmation: { status: confirmationStatus, draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: confirmationError },
+    });
+  } catch (error) {
+    updateProcessing(record, {
+      confirmation: { status: "failed", draftId: conversation.draftId, error: error.message },
+    });
+  }
+}
+
+async function processTask(record, { skipSheet = false } = {}) {
+  const conversation = createConversation(record);
+  const context = conversation?.fields
+    ? { fields: conversation.fields, history: conversation.history }
+    : null;
+  if (conversation && context) conversation.written = false;
+  updateProcessing(record, {
+    extraction: { status: taskExtractor.configured ? "extracting" : "rules", error: "" },
+    sheet: { status: skipSheet ? "skipped" : "awaiting_confirmation", error: "" },
+    confirmation: { status: "queued", error: "" },
+  });
+
+  let fields;
+  try {
+    fields = await taskExtractor.extract(record.parsed.text, record.payload, { context });
+  } catch (error) {
+    updateProcessing(record, {
+      extraction: { status: "failed", error: error.message },
+      sheet: { status: "not_attempted" },
+      confirmation: { status: "not_attempted" },
+    });
+    return;
+  }
+
+  const draft = draftFromFields(fields, conversation || { createdAt: null }, record);
+  if (conversation) {
+    conversation.fields = {
+      taskContent: draft.task,
+      pic: draft.pic,
+      deadline: draft.deadline,
+      priority: draft.priority,
+      status: draft.status,
+    };
+    conversation.picEmployeeCode = resolvePicEmployeeCode(record, draft, conversation);
+    conversation.recordId = record.id;
+    conversation.target = conversationTarget(record.parsed, conversation);
+    conversation.history = [...conversation.history, record.parsed.text].filter(Boolean).slice(-6);
+  }
 
   updateProcessing(record, {
     extraction: {
       status: "complete",
       source: fields.source,
-      task: sheetTask.task,
-      pic: fields.pic,
-      deadline: fields.deadline,
-      taskContent: fields.taskContent,
-      priority: fields.priority,
-      taskStatus,
-      createdAt,
-      updatedAt,
+      task: draft.task,
+      pic: draft.pic,
+      deadline: draft.deadline,
+      taskContent: draft.task,
+      priority: draft.priority,
+      taskStatus: draft.status,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+      taskId: conversation?.taskId || null,
     },
   });
 
-  if (skipSheet || !googleSheetsWriteEnabled) {
-    updateProcessing(record, { sheet: { status: skipSheet ? "skipped" : "paused" } });
-    return;
-  }
+  await sendConfirmationCard(record, conversation || {
+    key: `record:${record.id}`,
+    draftId: `draft-${record.id}`,
+    target: conversationTarget(record.parsed),
+    confirmationValue: null,
+  }, draft, { skipSend: skipSheet });
+}
 
-  const missingRequiredFields = [
-    ["PIC", sheetTask.pic],
-    ["Deadline", sheetTask.deadline],
-    ["Task", sheetTask.task],
-  ].filter(([, value]) => !String(value || "").trim()).map(([field]) => field);
-  if (missingRequiredFields.length) {
-    updateProcessing(record, {
-      sheet: {
-        status: "missing_required_fields",
-        error: `Chưa ghi Google Sheet vì thiếu field bắt buộc: ${missingRequiredFields.join(", ")}.`,
-      },
-    });
-    return;
-  }
-
-  if (!googleSheets.isConfigured()) {
-    updateProcessing(record, { sheet: { status: "not_configured" } });
-    return;
-  }
-  if (!googleSheets.isAuthorized()) {
-    updateProcessing(record, {
-      sheet: {
-        status: "auth_required",
-        error: "Chưa kết nối Google. Mở nút Kết nối Google trên website.",
-      },
-    });
-    return;
-  }
-
-  updateProcessing(record, { sheet: { status: "writing", error: "" } });
+async function sendConfirmationResult(conversation, text) {
+  if (!conversation || !seatalk.isConfigured()) return;
   try {
-    const result = await googleSheets.appendTask(sheetTask);
-    updateProcessing(record, {
-      sheet: {
-        status: "written",
-        rowNumber: result.rowNumber,
-        updatedRange: result.updatedRange,
-      },
-      extraction: { taskId: result.taskId },
+    await seatalk.sendReply(conversation.target, {
+      tag: "text",
+      text: { format: 2, content: text },
     });
   } catch (error) {
-    updateProcessing(record, { sheet: { status: "failed", error: error.message } });
+    console.error("SeaTalk confirmation reply failed:", error.message);
   }
 }
 
-async function retryPendingSheetWrites() {
-  for (const record of messages) {
-    const extraction = record.processing?.extraction;
-    const sheet = record.processing?.sheet;
-    if (
-      record.parsed?.kind === "message" &&
-      extraction?.status === "complete" &&
-      ["auth_required", "failed"].includes(sheet?.status)
-    ) {
-      await processTask(record);
+async function sendTaskAssignmentNotification(conversation, draft) {
+  if (!conversation || !seatalk.isConfigured()) return null;
+  const employeeCode = conversation.picEmployeeCode;
+  if (!employeeCode) throw new Error("Không xác định được employee_code của PIC để gửi thông báo giao task.");
+  return seatalk.sendSingleChat(employeeCode, buildTaskAssignmentMessage(draft));
+}
+
+async function confirmTaskInternal(value, clickRecord, pending, conversation) {
+  if (conversation.written && conversation.rowNumber) return { handled: true, alreadyWritten: true };
+
+  const record = messages.find((item) => item.id === conversation.recordId) || clickRecord;
+  const draft = draftFromFields(conversation.fields || {}, conversation, record);
+  const missing = missingRequiredFields(draft);
+  if (missing.length) {
+    updateProcessing(record, {
+      sheet: { status: "missing_required_fields", error: `Chưa ghi Google Sheet vì thiếu field bắt buộc: ${missing.join(", ")}.` },
+      confirmation: { status: "needs_revision", error: `Thiếu field: ${missing.join(", ")}.` },
+    });
+    await sendConfirmationResult(conversation, `Chưa thể ghi Google Sheet. Vui lòng bổ sung: ${missing.join(", ")}.`);
+    return { handled: true, missing };
+  }
+  if (!googleSheetsWriteEnabled) {
+    updateProcessing(record, { sheet: { status: "paused", error: "GOOGLE_SHEETS_WRITE_ENABLED đang là false." }, confirmation: { status: "blocked" } });
+    await sendConfirmationResult(conversation, "Đã nhận Confirm nhưng hệ thống đang tắt ghi Google Sheet (GOOGLE_SHEETS_WRITE_ENABLED=false).");
+    return { handled: true, blocked: true };
+  }
+  if (!googleSheets.isConfigured()) {
+    updateProcessing(record, { sheet: { status: "not_configured", error: "Google Sheets OAuth chưa được cấu hình." }, confirmation: { status: "blocked" } });
+    await sendConfirmationResult(conversation, "Chưa thể ghi task vì Google Sheets OAuth chưa được cấu hình.");
+    return { handled: true, blocked: true };
+  }
+  if (!googleSheets.isAuthorized()) {
+    updateProcessing(record, { sheet: { status: "auth_required", error: "Chưa kết nối Google. Mở nút Kết nối Google trên website." }, confirmation: { status: "blocked" } });
+    await sendConfirmationResult(conversation, "Chưa thể ghi task vì bot chưa được kết nối Google Sheets.");
+    return { handled: true, blocked: true };
+  }
+
+  updateProcessing(record, { sheet: { status: "writing", error: "" }, confirmation: { status: "writing", error: "" } });
+  try {
+    const isUpdate = Boolean(conversation.rowNumber);
+    const result = conversation.rowNumber
+      ? await googleSheets.updateTask(conversation.rowNumber, { ...draft, id: conversation.taskId })
+      : await googleSheets.appendTask(draft);
+    conversation.rowNumber = result.rowNumber;
+    conversation.taskId = result.taskId;
+    conversation.written = true;
+    confirmationDrafts.delete(value);
+    let notificationError = "";
+    try {
+      await sendTaskAssignmentNotification(conversation, draft);
+    } catch (notificationException) {
+      notificationError = notificationException.message;
+      console.error("SeaTalk PIC notification failed:", notificationError);
     }
+    updateProcessing(record, {
+      sheet: { status: "written", rowNumber: result.rowNumber, updatedRange: result.updatedRange },
+      extraction: { taskId: result.taskId, updatedAt: draft.updatedAt },
+      confirmation: { status: "confirmed", draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: notificationError },
+    });
+    return { handled: true, written: true };
+  } catch (error) {
+    updateProcessing(record, { sheet: { status: "failed", error: error.message }, confirmation: { status: "failed", error: error.message } });
+    await sendConfirmationResult(conversation, `Ghi Google Sheet thất bại: ${error.message}`);
+    return { handled: true, error: error.message };
+  }
+}
+
+async function confirmTask(value, clickRecord) {
+  const pending = confirmationDrafts.get(value);
+  if (!pending) return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
+  const conversation = conversations.get(pending.key);
+  if (!conversation || conversation.draftId !== pending.draftId) {
+    return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
+  }
+  if (conversation.confirmPromise) return conversation.confirmPromise;
+  const promise = confirmTaskInternal(value, clickRecord, pending, conversation);
+  conversation.confirmPromise = promise;
+  try {
+    return await promise;
+  } finally {
+    if (conversation.confirmPromise === promise) conversation.confirmPromise = null;
   }
 }
 
@@ -403,7 +673,6 @@ async function handleGoogleCallback(url, response) {
 
   try {
     await googleSheets.authorizeWithCode(code);
-    void retryPendingSheetWrites();
     redirect(response, "/?google=connected");
   } catch (error) {
     console.error("Google OAuth callback failed:", error.message);
@@ -440,7 +709,15 @@ async function handleWebhook(request, response) {
   }
 
   const { record, duplicate } = addMessage(payload);
-  if (!duplicate && record.parsed.kind === "message") void processTask(record);
+  if (!duplicate && record.parsed.kind === "message") {
+    const conversation = conversations.get(conversationKey(record.parsed));
+    if (conversation?.confirmationValue && isConfirmRequest(record.parsed.text)) {
+      void confirmTask(conversation.confirmationValue, record);
+    } else {
+      void processTask(record);
+    }
+  }
+  if (!duplicate && record.parsed.kind === "interaction") void confirmTask(record.parsed.buttonValue, record);
   if (
     duplicate &&
     record.parsed.kind === "message" &&
@@ -515,6 +792,7 @@ const server = createServer(async (request, response) => {
       chatflowConfigured: Boolean(chatflowUrl && chatflowToken),
       taskExtractor: taskExtractor.provider,
       taskExtractionConfigured: taskExtractor.configured,
+      seatalkConfigured: seatalk.isConfigured(),
       googleSheetsWriteEnabled,
       googleSheetsConfigured: googleSheets.isConfigured(),
       googleSheetsAuthorized: googleSheets.isAuthorized(),
@@ -569,8 +847,9 @@ const server = createServer(async (request, response) => {
   sendJson(response, 405, { ok: false, error: "Method không được hỗ trợ" });
 });
 
-server.listen(port, "127.0.0.1", () => {
+server.listen(port, host, () => {
   console.log(`Alpha Intel SeaTalk inbox: http://localhost:${port}`);
+  console.log(`Server bind: ${host}:${port}`);
   console.log(`Webhook callback: http://localhost:${port}/callback`);
   if (signingSecret) console.log("SeaTalk signature verification: enabled");
 });
