@@ -105,6 +105,17 @@ test("deadline normalization resolves the nearest future date from partial dates
   assert.equal(normalizeDeadline("trong tuần này", "2026-09-19", "18/09/2026"), "17/09/2026");
 });
 
+test("payload hints parse a natural deadline revision for Sheet updates", () => {
+  assert.equal(
+    extractPayloadHints("Đổi deadline sang thứ 2 tuần sau", {}, "2026-09-22").deadline,
+    "28/09/2026",
+  );
+  assert.equal(
+    extractPayloadHints("Đổi deadline task #18 sang thứ 2 tuần sau", {}, "2026-09-22").deadline,
+    "28/09/2026",
+  );
+});
+
 test("priority maps to a deadline when no explicit date is available", () => {
   assert.equal(deadlineFromPriority("P0", "2026-09-19"), "19/09/2026");
   assert.equal(deadlineFromPriority("P1", "2026-09-19"), "22/09/2026");
@@ -480,6 +491,7 @@ test("confirmation authorization allows the creator, rejects another identity, a
 
 test("SeaTalk builds a direct PIC assignment notification", () => {
   const message = buildTaskAssignmentMessage({
+    taskId: 42,
     task: "Cập nhật dashboard",
     pic: "an@example.com",
     deadline: "30/09/2026",
@@ -489,6 +501,7 @@ test("SeaTalk builds a direct PIC assignment notification", () => {
 
   assert.equal(message.tag, "text");
   assert.match(message.text.content, /Task đã được xác nhận và ghi nhận/);
+  assert.match(message.text.content, /Sheet Task ID: #42/);
   assert.match(message.text.content, /PIC: an@example.com/);
   assert.match(message.text.content, /Nội dung Task: Cập nhật dashboard/);
   assert.match(message.text.content, /Deadline: 30\/09\/2026/);

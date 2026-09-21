@@ -71,11 +71,12 @@ function buildConfirmationMessage(draft, confirmationValue) {
     value: `task:deadline:${draftId}:${option.value}`,
   }));
   const description = [
+    draft.shortId ? `**Task #${draft.shortId}**` : null,
     `**PIC:** ${fieldValue(draft.pic)}`,
     `**Nội dung Task:** ${fieldValue(draft.task)}`,
     `**Deadline:** ${deadline}`,
     `**Priority:** ${fieldValue(draft.priority)}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   return {
     tag: "interactive_message",
@@ -118,11 +119,12 @@ function buildConfirmationMessage(draft, confirmationValue) {
 
 function buildConfirmedMessage(draft, draftId) {
   const description = [
+    draft.shortId ? `**Task #${draft.shortId}**` : null,
     `**PIC:** ${fieldValue(draft.pic)}`,
     `**Nội dung Task:** ${fieldValue(draft.task)}`,
     `**Deadline:** ${fieldValue(draft.deadline)}`,
     `**Priority:** ${fieldValue(draft.priority)}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   return {
     tag: "interactive_message",
@@ -149,6 +151,118 @@ function buildConfirmedMessage(draft, draftId) {
   };
 }
 
+function buildTaskClarificationMessage(text, clarifyId, tasks = [], truncated = false) {
+  const buttons = [
+    {
+      button_type: "callback",
+      text: "🆕 Tạo task mới",
+      value: `task:clarify:${clarifyId}:new`,
+    },
+    ...tasks.map((task) => ({
+      button_type: "callback",
+      text: `🔄 Cập nhật #${task.shortId}`,
+      value: `task:clarify:${clarifyId}:target:${task.shortId}`,
+    })),
+  ];
+  const buttonGroups = [];
+  for (let index = 0; index < buttons.length; index += 3) {
+    buttonGroups.push({
+      element_type: "button_group",
+      button_group: buttons.slice(index, index + 3),
+    });
+  }
+  const taskLines = tasks.map((task) => `#${task.shortId}: ${fieldValue(task.fields?.taskContent || task.fields?.task)}`);
+  const description = [
+    "Tin nhắn này chưa có quote hợp lệ. Bạn muốn:",
+    `\"${fieldValue(text)}\"`,
+    "",
+    ...taskLines,
+    truncated ? "(Chỉ hiển thị 5 task hoạt động gần nhất.)" : null,
+  ].filter((line) => line !== null).join("\n");
+
+  return {
+    tag: "interactive_message",
+    interactive_message: {
+      elements: [
+        {
+          element_type: "title",
+          title: { text: "Chọn task cần xử lý" },
+        },
+        {
+          element_type: "description",
+          description: { format: 1, text: description },
+        },
+        ...buttonGroups,
+      ],
+    },
+  };
+}
+
+function buildSheetTaskUpdateDescription(draft) {
+  return [
+    `**Sheet Task #${fieldValue(draft.id)}**`,
+    `**PIC:** ${fieldValue(draft.pic)}`,
+    `**Nội dung Task:** ${fieldValue(draft.task)}`,
+    `**Deadline:** ${fieldValue(draft.deadline)}`,
+    `**Priority:** ${fieldValue(draft.priority)}`,
+  ].join("\n");
+}
+
+function buildSheetTaskUpdateMessage(draft, updateId) {
+  const deadline = fieldValue(draft.deadline);
+  const priority = String(draft.priority || "").trim().toUpperCase();
+  const deadlineButtons = getDeadlineQuickPickOptions().slice(0, 3).map((option) => ({
+    button_type: "callback",
+    text: `${option.date === deadline ? "✅ " : ""}${option.label}`,
+    value: `task:sheet-update:deadline:${updateId}:${option.value}`,
+  }));
+  const priorityButtons = ["P0", "P1", "P2"].map((option) => ({
+    button_type: "callback",
+    text: `${option === priority ? "✅ " : ""}${option}`,
+    value: `task:sheet-update:priority:${updateId}:${option}`,
+  }));
+
+  return {
+    tag: "interactive_message",
+    interactive_message: {
+      elements: [
+        { element_type: "title", title: { text: "Cập nhật task đã ghi Sheet" } },
+        { element_type: "description", description: { format: 1, text: buildSheetTaskUpdateDescription(draft) } },
+        { element_type: "button_group", button_group: deadlineButtons },
+        { element_type: "button_group", button_group: priorityButtons },
+        {
+          element_type: "button",
+          button: {
+            button_type: "callback",
+            text: "Xác nhận đổi",
+            value: `task:sheet-update:confirm:${updateId}`,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function buildSheetTaskUpdatedMessage(draft, updateId) {
+  return {
+    tag: "interactive_message",
+    interactive_message: {
+      elements: [
+        { element_type: "title", title: { text: "Đã cập nhật task" } },
+        { element_type: "description", description: { format: 1, text: buildSheetTaskUpdateDescription(draft) } },
+        {
+          element_type: "button",
+          button: {
+            button_type: "callback",
+            text: "✅ Đã cập nhật task",
+            value: `task:sheet-update:updated:${updateId}`,
+          },
+        },
+      ],
+    },
+  };
+}
+
 function buildConfirmationText(draft) {
   const content = [
     "Xác nhận task:",
@@ -166,6 +280,7 @@ function buildConfirmationText(draft) {
 function buildTaskAssignmentMessage(draft) {
   const content = [
     "Task đã được xác nhận và ghi nhận:",
+    ...(draft.taskId !== null && draft.taskId !== undefined ? [`Sheet Task ID: #${fieldValue(draft.taskId)}`] : []),
     `PIC: ${fieldValue(draft.pic)}`,
     `Nội dung Task: ${fieldValue(draft.task)}`,
     `Deadline: ${fieldValue(draft.deadline)}`,
@@ -176,6 +291,19 @@ function buildTaskAssignmentMessage(draft) {
     tag: "text",
     text: { format: "2", content },
   };
+}
+
+function buildTaskAssignmentUpdatedMessage(draft) {
+  const content = [
+    "Task đã được cập nhật trong Google Sheet:",
+    ...(draft.taskId !== null && draft.taskId !== undefined ? [`Sheet Task ID: #${fieldValue(draft.taskId)}`] : []),
+    `PIC: ${fieldValue(draft.pic)}`,
+    `Nội dung Task: ${fieldValue(draft.task)}`,
+    `Deadline: ${fieldValue(draft.deadline)}`,
+    `Priority: ${fieldValue(draft.priority)}`,
+    `Status: ${fieldValue(draft.status || "IN PROGRESS")}`,
+  ].join("\n");
+  return { tag: "text", text: { format: "2", content } };
 }
 
 class SeaTalkClient {
@@ -280,8 +408,12 @@ export {
   SeaTalkClient,
   buildConfirmationMessage,
   buildConfirmedMessage,
+  buildTaskClarificationMessage,
+  buildSheetTaskUpdateMessage,
+  buildSheetTaskUpdatedMessage,
   buildConfirmationText,
   buildTaskAssignmentMessage,
+  buildTaskAssignmentUpdatedMessage,
   getDeadlineQuickPickOptions,
   resolveDeadlineQuickPick,
 };

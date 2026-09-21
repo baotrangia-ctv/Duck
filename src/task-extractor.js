@@ -374,15 +374,18 @@ function cleanHintText(value) {
 
 function extractDeadlineText(value) {
   const deadlineExpression = "(?:\\d{1,2}(?::\\d{2})?\\s*(?:giờ|h)\\s*(?:sáng|trưa|chiều|tối)?\\s*(?:hôm nay|nay|today)|hôm nay|ngày mai|ngày\\s+\\d{1,2}|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)(?:\\s+(?:tuần\\s+(?:sau|tới)|next\\s+week))?|\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2})";
+  const source = String(value || "")
+    .replace(/\b(?:task|công việc|cong viec)\s*(?:#\s*\d+|(?:id|mã|ma)\s*#?\s*\d+|\d+)\b/gi, " ")
+    .replace(/#\s*\d+\b/g, " ");
   const prefix = "(?:deadline|hạn(?: chót| hoàn thành)?|due date|trước|(?:hoàn thành|hoàn tất)\\s+(?:vào\\s+)?ngày|vào\\s+ngày)";
-  const revision = String(value || "").match(new RegExp(`(?:đổi|sửa|update|cập nhật|thay)\\s+${prefix}\\s*(?:(?:sang|thành|là|to)\\s*)?(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
+  const revision = source.match(new RegExp(`(?:đổi|sửa|update|cập nhật|thay)\\s+${prefix}\\s*(?:(?:sang|thành|là|to)\\s*)?(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
   if (revision) return cleanHintText(revision[1]);
-  const standalone = String(value || "").match(/\b(?:trong\s+)?(?:tuần\s+sau\s+nữa|hai\s+tuần\s+tới|tuần\s+(?:sau|tới|này|trước))\b/i);
+  const standalone = source.match(/\b(?:trong\s+)?(?:tuần\s+sau\s+nữa|hai\s+tuần\s+tới|tuần\s+(?:sau|tới|này|trước))\b/i);
   if (standalone && /\b(?:thứ\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|thu\s+(?:[2-7]|hai|ba|tư|nam|sau|bay))\s*$/i.test(String(value || "").slice(0, standalone.index))) {
     return cleanHintText(String(value || "").match(new RegExp(`(${deadlineExpression})`, "i"))?.[1]);
   }
   if (standalone) return cleanHintText(standalone[0]);
-  const match = String(value || "").match(new RegExp(`${prefix}\\s*(?:(?:là|sang|thành|vào|trước)\\s*)?[:=-]?\\s*(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
+  const match = source.match(new RegExp(`${prefix}\\s*(?:(?:là|sang|thành|vào|trước)\\s*)?[:=-]?\\s*(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
   return cleanHintText(match?.[1]);
 }
 

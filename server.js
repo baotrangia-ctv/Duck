@@ -3,17 +3,36 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
-import { createTaskExtractor } from "./src/task-extractor.js";
+import { createTaskExtractor, extractPayloadHints } from "./src/task-extractor.js";
 import { GoogleSheetsClient } from "./src/google-sheets.js";
 import {
   SeaTalkClient,
   buildConfirmationMessage,
   buildConfirmedMessage,
+  buildSheetTaskUpdateMessage,
+  buildSheetTaskUpdatedMessage,
+  buildTaskClarificationMessage,
   buildTaskAssignmentMessage,
+  buildTaskAssignmentUpdatedMessage,
   resolveDeadlineQuickPick,
 } from "./src/seatalk.js";
-import { isConfirmationClickAuthorized } from "./src/confirmation-auth.js";
+import {
+  isClarificationClickAuthorized,
+  isConfirmationClickAuthorized,
+  isSheetUpdateClickAuthorized,
+  isTaskMessageUpdateAuthorized,
+} from "./src/confirmation-auth.js";
 import { parseConfirmationButtonValue } from "./src/confirmation-routing.js";
+import { detectTaskIntent } from "./src/sheet-task-updates.js";
+import {
+  createPendingClarification,
+  createTask,
+  createThreadSession,
+  findTaskByMessageId,
+  getRecentTasks,
+  reopenTaskForConfirmation,
+  resolveTaskRoute,
+} from "./src/thread-sessions.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(root, "public");
@@ -64,8 +83,10 @@ const maxMessages = 100;
 const messages = [];
 const clients = new Set();
 const oauthStates = new Map();
-const conversations = new Map();
+const threadSessions = new Map();
 const confirmationDrafts = new Map();
+const sheetUpdateDrafts = new Map();
+const sheetMessageReferences = new Map();
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -167,6 +188,7 @@ function parseSeaTalkEvent(payload) {
     "message_from_bot_subscriber",
     "new_bot_subscriber_message",
     "new_mentioned_message_received_from_group_chat",
+    "new_message_received_from_thread",
     "message",
   ].includes(eventType)) {
     const messageId = event?.message_id || message.message_id || message.id || payload?.event_id || null;
@@ -180,6 +202,7 @@ function parseSeaTalkEvent(payload) {
       employeeCode: sender.employee_code || event.employee_code || null,
       email: sender.email || event.email || null,
       messageId,
+      quotedMessageId: message.quoted_message_id || message.quotedMessageId || event.quoted_message_id || null,
       groupId: event.group_id || event.group?.group_id || null,
       threadId: event.thread_id || message.thread_id || event.thread?.thread_id || message.thread?.thread_id || (event.group_id || event.group?.group_id ? messageId : null),
       messageType: message.tag || "text",
@@ -278,20 +301,11 @@ function conversationKey(parsed) {
   return null;
 }
 
-function isDraftRevisionRequest(text) {
-  const value = String(text || "").normalize("NFC").trim();
-  if (!value) return false;
-  if (/\b(?:tạo|tao|create|new)\s+(?:task|công việc)\b/i.test(value)) return false;
-  const fieldMentioned = /\b(?:priority|p0|p1|p2|ưu tiên|mức độ ưu tiên|độ ưu tiên|deadline|hạn(?: chót| hoàn thành)?|due date|pic|người phụ trách|phụ trách|giao cho|status|trạng thái)\b/i.test(value);
-  const revisionLanguage = /\b(?:chỉnh|chinh|đổi|doi|sửa|sua|update|cập nhật|cap nhat|thay|set|change|thành|là|sang|về|to)\b/i.test(value);
-  return fieldMentioned && revisionLanguage;
-}
-
-function conversationTarget(parsed, existing = null) {
+function threadTarget(parsed, existing = null) {
   return {
-    groupId: parsed?.groupId || existing?.target?.groupId || null,
-    employeeCode: parsed?.employeeCode || existing?.target?.employeeCode || null,
-    threadId: parsed?.threadId || existing?.target?.threadId || null,
+    groupId: parsed?.groupId || existing?.groupId || null,
+    employeeCode: parsed?.employeeCode || existing?.employeeCode || null,
+    threadId: parsed?.threadId || existing?.threadId || null,
   };
 }
 
@@ -300,7 +314,7 @@ function normalizeEmail(value) {
   return text && text.includes("@") ? text : null;
 }
 
-function resolvePicEmployeeCode(record, draft, conversation) {
+function resolvePicEmployeeCode(record, draft, task) {
   const payload = record?.payload || {};
   const message = payload?.event?.message || payload?.message || {};
   const sender = message?.sender || payload?.event?.sender || payload?.sender || {};
@@ -315,69 +329,56 @@ function resolvePicEmployeeCode(record, draft, conversation) {
   });
 
   if (matchingMention?.employee_code) return matchingMention.employee_code;
-  if (conversation?.picEmployeeCode) return conversation.picEmployeeCode;
+  if (task?.picEmployeeCode) return task.picEmployeeCode;
   if (senderEmployeeCode && (!draftPic || senderEmail === draftPic)) return senderEmployeeCode;
   return null;
 }
 
-function findRelatedConversation(record, key) {
-  const parsed = record.parsed;
-  if (!parsed?.groupId || !isDraftRevisionRequest(parsed.text)) return null;
-
-  const candidates = [...new Set(conversations.values())]
-    .filter((conversation) => conversation.key !== key)
-    .filter((conversation) => conversation.fields && !conversation.written)
-    .filter((conversation) => conversation.target?.groupId === parsed.groupId)
-    .filter((conversation) => !parsed.employeeCode || !conversation.target?.employeeCode || conversation.target.employeeCode === parsed.employeeCode)
-    .sort((a, b) => String(b.lastActivityAt || b.createdAt || "").localeCompare(String(a.lastActivityAt || a.createdAt || "")));
-
-  return candidates[0] || null;
-}
-
-function createConversation(record) {
+function getThreadSession(record) {
   const key = conversationKey(record.parsed);
   if (!key) return null;
-  const existing = conversations.get(key);
+  const existing = threadSessions.get(key);
   if (existing) {
-    existing.target = conversationTarget(record.parsed, existing);
-    existing.lastActivityAt = record.timestamp || record.receivedAt;
+    existing.target = threadTarget(record.parsed, existing.target);
     return existing;
   }
-  const related = findRelatedConversation(record, key);
-  if (related) {
-    conversations.set(key, related);
-    related.key = key;
-    related.target = conversationTarget(record.parsed, related);
-    related.lastActivityAt = record.timestamp || record.receivedAt;
-    return related;
+  const session = createThreadSession(key, threadTarget(record.parsed));
+  threadSessions.set(key, session);
+  return session;
+}
+
+function findSessionTaskByMessageId(messageId) {
+  for (const session of threadSessions.values()) {
+    const task = findTaskByMessageId(session, messageId);
+    if (task) return { session, task };
   }
-  const conversation = {
-    key,
+  return null;
+}
+
+function rememberSheetMessage(messageId, taskId) {
+  const value = String(messageId || "").trim();
+  if (!value || taskId === null || taskId === undefined) return;
+  sheetMessageReferences.set(value, { taskId: Number(taskId) });
+}
+
+function createNewTask(session, record) {
+  const createdAt = record.timestamp || record.receivedAt;
+  return createTask(session, {
     draftId: `draft-${randomBytes(12).toString("hex")}`,
-    target: conversationTarget(record.parsed),
-    fields: null,
-    history: [],
     recordId: record.id,
-    createdAt: record.timestamp || record.receivedAt,
-    rowNumber: null,
-    taskId: null,
-    confirmationValue: null,
-    confirmationMessageId: null,
-    fieldUpdatePromise: null,
+    createdAt,
+    lastActivityAt: createdAt,
     creatorEmail: record.parsed.email || null,
     creatorEmployeeCode: record.parsed.employeeCode || null,
     creatorSeatalkId: record.parsed.seatalkId || null,
-    picEmployeeCode: null,
-    written: false,
-    lastActivityAt: record.timestamp || record.receivedAt,
-  };
-  conversations.set(key, conversation);
-  return conversation;
+    sourceMessageId: record.parsed.messageId || null,
+  });
 }
 
-function draftFromFields(fields, conversation, record) {
-  const createdAt = conversation.createdAt || record.timestamp || record.receivedAt;
+function draftFromFields(fields, task, record) {
+  const createdAt = task.createdAt || record.timestamp || record.receivedAt;
   return {
+    shortId: task.shortId,
     task: fields.taskContent,
     pic: fields.pic,
     deadline: fields.deadline,
@@ -396,14 +397,15 @@ function missingRequiredFields(task) {
   ].filter(([, value]) => !String(value || "").trim()).map(([field]) => field);
 }
 
-async function sendConfirmationCard(record, conversation, draft, { skipSend = false } = {}) {
-  if (conversation.confirmationValue) confirmationDrafts.delete(conversation.confirmationValue);
-  conversation.confirmationValue = null;
+async function sendConfirmationCard(record, session, task, draft, { skipSend = false } = {}) {
+  if (task.confirmationValue) confirmationDrafts.delete(task.confirmationValue);
+  task.confirmationValue = null;
+  task.confirmationMessageId = null;
 
   if (skipSend || !record.parsed.groupId && !record.parsed.employeeCode) {
     updateProcessing(record, {
       sheet: { status: skipSend ? "skipped" : "awaiting_confirmation" },
-      confirmation: { status: "not_attempted", draftId: conversation.draftId, messageId: null },
+      confirmation: { status: "not_attempted", draftId: task.draftId, messageId: null },
     });
     return;
   }
@@ -411,54 +413,342 @@ async function sendConfirmationCard(record, conversation, draft, { skipSend = fa
     updateProcessing(record, {
       confirmation: {
         status: "not_configured",
-        draftId: conversation.draftId,
+        draftId: task.draftId,
         error: "Chưa cấu hình SEATALK_APP_ID/SEATALK_APP_SECRET hoặc SEATALK_ACCESS_TOKEN để gửi card Confirm.",
       },
     });
     return;
   }
 
-  const confirmationValue = `task:confirm:${conversation.draftId}`;
-  conversation.confirmationValue = confirmationValue;
+  const confirmationValue = `task:confirm:${task.draftId}`;
+  task.confirmationValue = confirmationValue;
   confirmationDrafts.set(confirmationValue, {
-    key: conversation.key,
+    threadKey: session.key,
+    shortId: task.shortId,
     recordId: record.id,
-    draftId: conversation.draftId,
+    draftId: task.draftId,
   });
 
-  updateProcessing(record, { confirmation: { status: "sending", draftId: conversation.draftId, error: "" } });
+  updateProcessing(record, { confirmation: { status: "sending", draftId: task.draftId, error: "" } });
   try {
-    let result;
-    if (conversation.target.groupId) {
-      result = await seatalk.sendGroupChat(
-        conversation.target.groupId,
-        buildConfirmationMessage(draft, confirmationValue),
-        conversation.target.threadId,
-      );
-    } else {
-      result = await seatalk.sendConfirmation(conversation.target, draft, confirmationValue);
-    }
-    conversation.confirmationMessageId = result?.message_id || null;
+    const message = buildConfirmationMessage(draft, confirmationValue);
+    const result = await seatalk.sendReply(session.target, message);
+    task.confirmationMessageId = result?.message_id || null;
     updateProcessing(record, {
-      confirmation: { status: "sent", draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: "" },
+      confirmation: { status: "sent", draftId: task.draftId, messageId: task.confirmationMessageId, error: "" },
     });
   } catch (error) {
+    confirmationDrafts.delete(confirmationValue);
+    task.confirmationValue = null;
     updateProcessing(record, {
-      confirmation: { status: "failed", draftId: conversation.draftId, error: error.message },
+      confirmation: { status: "failed", draftId: task.draftId, error: error.message },
     });
   }
 }
 
-async function processTask(record, { skipSheet = false } = {}) {
-  const conversation = createConversation(record);
-  const context = conversation?.fields
-    ? { fields: conversation.fields, history: conversation.history }
+async function redrawConfirmationCard(record, session, task, draft) {
+  try {
+    if (!task.confirmationMessageId || !task.confirmationValue) {
+      throw new Error("Thiếu message_id hoặc callback value của card xác nhận để cập nhật.");
+    }
+    await seatalk.updateInteractiveMessage(
+      task.confirmationMessageId,
+      buildConfirmationMessage(draft, task.confirmationValue),
+    );
+    updateProcessing(record, {
+      extraction: {
+        deadline: draft.deadline,
+        priority: draft.priority,
+        updatedAt: draft.updatedAt,
+      },
+      confirmation: {
+        status: "sent",
+        draftId: task.draftId,
+        messageId: task.confirmationMessageId,
+        error: "",
+      },
+    });
+  } catch (error) {
+    console.error("SeaTalk confirmation card update failed; resending:", error.message);
+    await sendConfirmationCard(record, session, task, draft);
+  }
+}
+
+function sheetTaskTarget(record) {
+  return threadTarget(record.parsed);
+}
+
+function isSheetRowUpdateAuthorized(record, task) {
+  const requesterEmail = normalizeEmail(record?.parsed?.email);
+  const picEmail = normalizeEmail(task?.pic);
+  return Boolean(requesterEmail && picEmail && requesterEmail === picEmail);
+}
+
+async function sendSheetUpdateText(record, text) {
+  if (!seatalk.isConfigured()) return;
+  try {
+    await seatalk.sendReply(sheetTaskTarget(record), {
+      tag: "text",
+      text: { format: 2, content: text },
+    });
+  } catch (error) {
+    console.error("SeaTalk Sheet update reply failed:", error.message);
+  }
+}
+
+function createSheetUpdateDraft(record, sheetTask, { picEmployeeCode = null } = {}) {
+  const updateId = `update-${randomBytes(12).toString("hex")}`;
+  const pending = {
+    updateId,
+    rowNumber: sheetTask.rowNumber,
+    taskId: sheetTask.id,
+    fields: { ...sheetTask },
+    target: sheetTaskTarget(record),
+    recordId: record.id,
+    picEmail: normalizeEmail(sheetTask.pic),
+    picEmployeeCode: picEmployeeCode || record.parsed.employeeCode || null,
+    messageId: null,
+    fieldUpdatePromise: null,
+    confirmPromise: null,
+  };
+  sheetUpdateDrafts.set(updateId, pending);
+  return pending;
+}
+
+function applyNaturalSheetUpdate(record, pending) {
+  const hints = extractPayloadHints(record.parsed.text, record.payload);
+  if (hints.deadline) pending.fields.deadline = hints.deadline;
+
+  const priority = /\b(?:priority|uu tien|muc do uu tien|do uu tien)\b/i.test(record.parsed.text || "")
+    ? String(record.parsed.text || "").match(/\bP[0-2]\b/i)?.[0]?.toUpperCase()
     : null;
-  if (conversation && context) conversation.written = false;
+  if (priority) pending.fields.priority = priority;
+  return pending;
+}
+
+async function sendSheetUpdateCard(record, pending) {
+  if (!seatalk.isConfigured()) {
+    updateProcessing(record, { confirmation: { status: "not_configured", error: "Chưa cấu hình SeaTalk để gửi form cập nhật task." } });
+    return;
+  }
+  updateProcessing(record, {
+    sheet: { status: "awaiting_update_confirmation", rowNumber: pending.rowNumber },
+    extraction: {
+      taskId: pending.taskId,
+      task: pending.fields.task,
+      taskContent: pending.fields.task,
+      pic: pending.fields.pic,
+      deadline: pending.fields.deadline,
+      priority: pending.fields.priority,
+      taskStatus: pending.fields.status,
+    },
+    confirmation: { status: "sending", draftId: pending.updateId, error: "" },
+  });
+  try {
+    const result = await seatalk.sendReply(pending.target, buildSheetTaskUpdateMessage(pending.fields, pending.updateId));
+    pending.messageId = result?.message_id || null;
+    rememberSheetMessage(pending.messageId, pending.taskId);
+    updateProcessing(record, { confirmation: { status: "sent", draftId: pending.updateId, messageId: pending.messageId, error: "" } });
+  } catch (error) {
+    updateProcessing(record, { confirmation: { status: "failed", draftId: pending.updateId, error: error.message } });
+  }
+}
+
+async function processSheetTaskUpdateById(record, taskId) {
+  if (!googleSheetsWriteEnabled) {
+    updateProcessing(record, { sheet: { status: "paused", error: "GOOGLE_SHEETS_WRITE_ENABLED đang là false." } });
+    await sendSheetUpdateText(record, "Hệ thống đang tắt cập nhật Google Sheet.");
+    return;
+  }
+  if (!googleSheets.isConfigured() || !googleSheets.isAuthorized()) {
+    updateProcessing(record, { sheet: { status: "auth_required", error: "Google Sheets OAuth chưa sẵn sàng." } });
+    await sendSheetUpdateText(record, "Chưa thể tìm task vì Google Sheets chưa được kết nối.");
+    return;
+  }
+
+  try {
+    const task = await googleSheets.findTaskById(taskId);
+    if (!task) {
+      updateProcessing(record, { sheet: { status: "not_found", error: "Không tìm thấy task phù hợp trong Google Sheet." } });
+      await sendSheetUpdateText(record, `Không tìm thấy Sheet Task ID #${taskId}. Hãy kiểm tra lại ID trong DM của PIC hoặc quote đúng tin nhắn task.`);
+      return;
+    }
+    if (!isSheetRowUpdateAuthorized(record, task)) {
+      updateProcessing(record, { sheet: { status: "forbidden", error: "Chỉ PIC của task mới được cập nhật task đã ghi Sheet." } });
+      await sendSheetUpdateText(record, "Bạn không có quyền cập nhật task này. Chỉ PIC được ghi trong Sheet mới được đổi Priority/Deadline.");
+      return;
+    }
+    const pending = applyNaturalSheetUpdate(record, createSheetUpdateDraft(record, task));
+    await sendSheetUpdateCard(record, pending);
+  } catch (error) {
+    updateProcessing(record, { sheet: { status: "failed", error: error.message } });
+    await sendSheetUpdateText(record, `Tìm task trong Google Sheet thất bại: ${error.message}`);
+  }
+}
+
+async function processSheetTaskUpdate(record, intent) {
+  if (intent.taskId === null) {
+    updateProcessing(record, { sheet: { status: "task_id_required", error: "Cần quote task hoặc nêu Sheet Task ID." } });
+    await sendSheetUpdateText(
+      record,
+      "Vui lòng quote đúng tin nhắn task cần update hoặc nêu Sheet Task ID, ví dụ: Đổi deadline Task ID 5 sang thứ 6.",
+    );
+    return;
+  }
+  await processSheetTaskUpdateById(record, intent.taskId);
+}
+
+async function updateSheetUpdateCard(pending, record) {
+  try {
+    if (!pending.messageId) throw new Error("Thiếu message_id của card cập nhật task.");
+    await seatalk.updateInteractiveMessage(
+      pending.messageId,
+      buildSheetTaskUpdateMessage(pending.fields, pending.updateId),
+    );
+    updateProcessing(record, {
+      extraction: { deadline: pending.fields.deadline, priority: pending.fields.priority, updatedAt: new Date().toISOString() },
+      confirmation: { status: "sent", draftId: pending.updateId, messageId: pending.messageId, error: "" },
+    });
+  } catch (error) {
+    console.error("Sheet update card redraw failed; resending:", error.message);
+    await sendSheetUpdateCard(record, pending);
+  }
+}
+
+async function updateSheetUpdateDraft(value, clickRecord) {
+  const action = parseConfirmationButtonValue(value);
+  if (!action || (action.kind !== "sheet_update_priority" && action.kind !== "sheet_update_deadline")) {
+    return { handled: false, error: "Nút cập nhật Sheet không hợp lệ." };
+  }
+  const pending = sheetUpdateDrafts.get(action.updateId);
+  if (!pending) return { handled: false, error: "Form cập nhật Sheet không còn tồn tại." };
+  if (!isSheetUpdateClickAuthorized(clickRecord, pending)) return { handled: true, ignored: true };
+  if (pending.fieldUpdatePromise) return pending.fieldUpdatePromise;
+
+  const record = messages.find((item) => item.id === pending.recordId) || clickRecord;
+  const nextValue = action.kind === "sheet_update_priority" ? action.value : resolveDeadlineQuickPick(action.value);
+  if (!nextValue) return { handled: false, error: "Giá trị cập nhật không hợp lệ." };
+  pending.fields[action.kind === "sheet_update_priority" ? "priority" : "deadline"] = nextValue;
+  const promise = updateSheetUpdateCard(pending, record);
+  pending.fieldUpdatePromise = promise;
+  try {
+    await promise;
+    return { handled: true, updated: true };
+  } finally {
+    if (pending.fieldUpdatePromise === promise) pending.fieldUpdatePromise = null;
+  }
+}
+
+async function confirmSheetUpdate(value, clickRecord) {
+  const action = parseConfirmationButtonValue(value);
+  if (!action || action.kind !== "sheet_update_confirm") return { handled: false, error: "Nút Confirm cập nhật Sheet không hợp lệ." };
+  const pending = sheetUpdateDrafts.get(action.updateId);
+  if (!pending) return { handled: false, error: "Form cập nhật Sheet không còn tồn tại." };
+  if (!isSheetUpdateClickAuthorized(clickRecord, pending)) return { handled: true, ignored: true };
+  if (pending.confirmPromise) return pending.confirmPromise;
+
+  const record = messages.find((item) => item.id === pending.recordId) || clickRecord;
+  updateProcessing(record, { sheet: { status: "writing", error: "" }, confirmation: { status: "writing", error: "" } });
+  const promise = (async () => {
+    try {
+      pending.fields.updatedAt = new Date().toISOString();
+      const result = await googleSheets.updateTask(pending.rowNumber, { ...pending.fields, id: pending.taskId });
+      let notificationError = "";
+      if (pending.picEmployeeCode) {
+        try {
+          const notification = await seatalk.sendSingleChat(
+            pending.picEmployeeCode,
+            buildTaskAssignmentUpdatedMessage({ ...pending.fields, taskId: pending.taskId }),
+          );
+          rememberSheetMessage(notification?.message_id, pending.taskId);
+        } catch (error) {
+          notificationError = error.message;
+        }
+      } else {
+        notificationError = "Không xác định được employee_code của PIC để gửi DM cập nhật.";
+      }
+
+      let cardError = "";
+      try {
+        await seatalk.updateInteractiveMessage(
+          pending.messageId,
+          buildSheetTaskUpdatedMessage(pending.fields, pending.updateId),
+        );
+      } catch (error) {
+        cardError = error.message;
+      }
+      const errorText = [notificationError, cardError].filter(Boolean).join(" ");
+      updateProcessing(record, {
+        sheet: { status: "updated", rowNumber: result.rowNumber, updatedRange: result.updatedRange, error: "" },
+        extraction: { taskId: result.taskId, deadline: pending.fields.deadline, priority: pending.fields.priority, updatedAt: pending.fields.updatedAt },
+        confirmation: { status: "updated", draftId: pending.updateId, messageId: pending.messageId, error: errorText },
+      });
+      sheetUpdateDrafts.delete(pending.updateId);
+      return { handled: true, updated: true };
+    } catch (error) {
+      updateProcessing(record, { sheet: { status: "failed", error: error.message }, confirmation: { status: "failed", error: error.message } });
+      await sendSheetUpdateText(record, `Cập nhật Google Sheet thất bại: ${error.message}`);
+      return { handled: true, error: error.message };
+    }
+  })();
+  pending.confirmPromise = promise;
+  try {
+    return await promise;
+  } finally {
+    if (pending.confirmPromise === promise) pending.confirmPromise = null;
+  }
+}
+
+async function sendClarificationCard(record, session, clarification) {
+  if (!seatalk.isConfigured()) {
+    updateProcessing(record, {
+      confirmation: {
+        status: "not_configured",
+        error: "Chưa cấu hình SeaTalk để gửi card chọn task.",
+      },
+    });
+    return;
+  }
+
+  const tasks = getRecentTasks(session);
+  const message = buildTaskClarificationMessage(
+    record.parsed.text,
+    clarification.clarifyId,
+    tasks,
+    session.tasks.size > tasks.length,
+  );
+  updateProcessing(record, { confirmation: { status: "clarifying", error: "" } });
+  try {
+    const result = await seatalk.sendReply(session.target, message);
+    clarification.clarifyMessageId = result?.message_id || null;
+    updateProcessing(record, {
+      confirmation: { status: "clarification_sent", messageId: clarification.clarifyMessageId, error: "" },
+    });
+  } catch (error) {
+    updateProcessing(record, { confirmation: { status: "failed", error: error.message } });
+  }
+}
+
+function updateTaskFromDraft(task, draft, record) {
+  task.fields = {
+    taskContent: draft.task,
+    pic: draft.pic,
+    deadline: draft.deadline,
+    priority: draft.priority,
+    status: draft.status,
+  };
+  task.recordId = record.id;
+  task.lastActivityAt = record.timestamp || record.receivedAt;
+  task.history = [...task.history, record.parsed.text].filter(Boolean).slice(-6);
+}
+
+async function processTaskForTask(record, session, task, { skipSheet = false } = {}) {
+  const context = task.fields ? { fields: task.fields, history: task.history } : null;
+  const wasWritten = task.written;
   updateProcessing(record, {
     extraction: { status: taskExtractor.configured ? "extracting" : "rules", error: "" },
     sheet: { status: skipSheet ? "skipped" : "awaiting_confirmation", error: "" },
-    confirmation: { status: "queued", error: "" },
+    confirmation: { status: "queued", draftId: task.draftId, error: "" },
   });
 
   let fields;
@@ -473,20 +763,9 @@ async function processTask(record, { skipSheet = false } = {}) {
     return;
   }
 
-  const draft = draftFromFields(fields, conversation || { createdAt: null }, record);
-  if (conversation) {
-    conversation.fields = {
-      taskContent: draft.task,
-      pic: draft.pic,
-      deadline: draft.deadline,
-      priority: draft.priority,
-      status: draft.status,
-    };
-    conversation.picEmployeeCode = resolvePicEmployeeCode(record, draft, conversation);
-    conversation.recordId = record.id;
-    conversation.target = conversationTarget(record.parsed, conversation);
-    conversation.history = [...conversation.history, record.parsed.text].filter(Boolean).slice(-6);
-  }
+  const draft = draftFromFields(fields, task, record);
+  updateTaskFromDraft(task, draft, record);
+  task.picEmployeeCode = resolvePicEmployeeCode(record, draft, task);
 
   updateProcessing(record, {
     extraction: {
@@ -500,22 +779,127 @@ async function processTask(record, { skipSheet = false } = {}) {
       taskStatus: draft.status,
       createdAt: draft.createdAt,
       updatedAt: draft.updatedAt,
-      taskId: conversation?.taskId || null,
+      taskId: task.taskId || null,
     },
   });
 
-  await sendConfirmationCard(record, conversation || {
-    key: `record:${record.id}`,
-    draftId: `draft-${record.id}`,
-    target: conversationTarget(record.parsed),
-    confirmationValue: null,
-  }, draft, { skipSend: skipSheet });
+  if (wasWritten) {
+    reopenTaskForConfirmation(task);
+    await sendConfirmationCard(record, session, task, draft, { skipSend: skipSheet });
+    return;
+  }
+
+  if (task.confirmationMessageId && task.confirmationValue && !skipSheet) {
+    await redrawConfirmationCard(record, session, task, draft);
+    return;
+  }
+
+  await sendConfirmationCard(record, session, task, draft, { skipSend: skipSheet });
 }
 
-async function sendConfirmationResult(conversation, text) {
-  if (!conversation || !seatalk.isConfigured()) return;
+function detectReferencedTaskIntent(text, taskId) {
+  const direct = detectTaskIntent(text);
+  if (direct) return direct;
+  return detectTaskIntent(`Task ID ${taskId} ${text}`);
+}
+
+async function rejectUnsupportedSheetUpdate(record) {
+  await sendSheetUpdateText(record, "Phase 2 hiện chỉ hỗ trợ đổi Priority và Deadline. Status/PIC chưa được hỗ trợ.");
+  updateProcessing(record, { confirmation: { status: "unsupported_update" } });
+}
+
+async function requireReferencedSheetTaskUpdate(record, taskId) {
+  const intent = detectReferencedTaskIntent(record.parsed.text, taskId);
+  if (intent?.intent === "unsupported_update_existing_sheet_task") {
+    await rejectUnsupportedSheetUpdate(record);
+    return;
+  }
+  if (intent?.intent !== "update_existing_sheet_task") {
+    await sendSheetUpdateText(record, "Hãy nêu rõ Priority hoặc Deadline cần đổi khi quote task, ví dụ: Đổi deadline sang thứ 4.");
+    updateProcessing(record, { sheet: { status: "update_fields_required" } });
+    return;
+  }
+  await processSheetTaskUpdateById(record, taskId);
+}
+
+async function processTask(record, { skipSheet = false } = {}) {
+  const intent = detectTaskIntent(record.parsed.text);
+  if (intent?.intent === "unsupported_update_existing_sheet_task") {
+    await rejectUnsupportedSheetUpdate(record);
+    return;
+  }
+
+  const quotedTaskReference = record.parsed.quotedMessageId
+    ? findSessionTaskByMessageId(record.parsed.quotedMessageId)
+    : null;
+  if (quotedTaskReference) {
+    const { session, task } = quotedTaskReference;
+    if (task.written) {
+      if (!isTaskMessageUpdateAuthorized(record, task)) {
+        updateProcessing(record, { confirmation: { status: "ignored", error: "Chỉ PIC của task đã ghi Sheet mới được cập nhật task này." } });
+        return;
+      }
+      await requireReferencedSheetTaskUpdate(record, task.taskId);
+      return;
+    }
+    if (!isTaskMessageUpdateAuthorized(record, task)) {
+      updateProcessing(record, { confirmation: { status: "ignored", error: "Người gửi không có quyền cập nhật task này." } });
+      return;
+    }
+    await processTaskForTask(record, session, task, { skipSheet });
+    return;
+  }
+
+  const quotedSheetReference = record.parsed.quotedMessageId
+    ? sheetMessageReferences.get(String(record.parsed.quotedMessageId))
+    : null;
+  if (quotedSheetReference) {
+    await requireReferencedSheetTaskUpdate(record, quotedSheetReference.taskId);
+    return;
+  }
+
+  if (record.parsed.quotedMessageId && (!intent || intent.taskId === null)) {
+    await sendSheetUpdateText(record, "Không nhận diện được tin nhắn task được quote. Hãy quote lại đúng tin nhắn task hoặc nêu Sheet Task ID, ví dụ: Đổi deadline Task ID 5 sang thứ 6.");
+    updateProcessing(record, { sheet: { status: "quoted_task_not_found" } });
+    return;
+  }
+
+  if (intent?.intent === "update_existing_sheet_task") {
+    await processSheetTaskUpdate(record, intent);
+    return;
+  }
+
+  const session = getThreadSession(record);
+  if (!session) return;
+
+  const route = resolveTaskRoute(session, record.parsed);
+  if (route.kind === "update") {
+    if (!isTaskMessageUpdateAuthorized(record, route.task)) {
+      updateProcessing(record, { confirmation: { status: "ignored", error: "Người gửi không có quyền cập nhật task này." } });
+      return;
+    }
+    await processTaskForTask(record, session, route.task, { skipSheet });
+    return;
+  }
+  if (route.kind === "clarify") {
+    const clarification = createPendingClarification(session, {
+      recordId: record.id,
+      senderEmail: record.parsed.email || null,
+      senderEmployeeCode: record.parsed.employeeCode || null,
+      senderSeatalkId: record.parsed.seatalkId || record.parsed.senderId || null,
+    });
+    await sendClarificationCard(record, session, clarification);
+    return;
+  }
+
+  const task = route.task || createNewTask(session, record);
+  await processTaskForTask(record, session, task, { skipSheet });
+}
+
+async function sendConfirmationResult(session, text) {
+  if (!session || !seatalk.isConfigured()) return;
   try {
-    await seatalk.sendReply(conversation.target, {
+    await seatalk.sendReply(session.target, {
       tag: "text",
       text: { format: 2, content: text },
     });
@@ -524,19 +908,19 @@ async function sendConfirmationResult(conversation, text) {
   }
 }
 
-async function sendTaskAssignmentNotification(conversation, draft) {
-  if (!conversation || !seatalk.isConfigured()) return null;
-  const employeeCode = conversation.picEmployeeCode;
+async function sendTaskAssignmentNotification(task, draft) {
+  if (!task || !seatalk.isConfigured()) return null;
+  const employeeCode = task.picEmployeeCode;
   if (!employeeCode) throw new Error("Không xác định được employee_code của PIC để gửi thông báo giao task.");
   return seatalk.sendSingleChat(employeeCode, buildTaskAssignmentMessage(draft));
 }
 
-async function updateConfirmationCardAfterConfirm(conversation, draft) {
-  if (!conversation?.confirmationMessageId || !seatalk.isConfigured()) return "";
+async function updateConfirmationCardAfterConfirm(task, draft) {
+  if (!task?.confirmationMessageId || !seatalk.isConfigured()) return "";
   try {
     await seatalk.updateInteractiveMessage(
-      conversation.confirmationMessageId,
-      buildConfirmedMessage(draft, conversation.draftId),
+      task.confirmationMessageId,
+      buildConfirmedMessage(draft, task.draftId),
     );
     return "";
   } catch (error) {
@@ -545,67 +929,70 @@ async function updateConfirmationCardAfterConfirm(conversation, draft) {
   }
 }
 
-async function confirmTaskInternal(value, clickRecord, pending, conversation) {
-  if (!isConfirmationClickAuthorized(clickRecord, conversation)) {
+async function confirmTaskInternal(value, clickRecord, pending, session, task) {
+  if (!isConfirmationClickAuthorized(clickRecord, task)) {
     return { handled: true, ignored: true };
   }
-  if (conversation.written && conversation.rowNumber) return { handled: true, alreadyWritten: true };
+  if (task.written && task.rowNumber) return { handled: true, alreadyWritten: true };
 
-  const record = messages.find((item) => item.id === conversation.recordId) || clickRecord;
-  const draft = draftFromFields(conversation.fields || {}, conversation, record);
+  const record = messages.find((item) => item.id === task.recordId) || clickRecord;
+  const draft = draftFromFields(task.fields || {}, task, record);
   const missing = missingRequiredFields(draft);
   if (missing.length) {
     updateProcessing(record, {
       sheet: { status: "missing_required_fields", error: `Chưa ghi Google Sheet vì thiếu field bắt buộc: ${missing.join(", ")}.` },
       confirmation: { status: "needs_revision", error: `Thiếu field: ${missing.join(", ")}.` },
     });
-    await sendConfirmationResult(conversation, `Chưa thể ghi Google Sheet. Vui lòng bổ sung: ${missing.join(", ")}.`);
+    await sendConfirmationResult(session, `Chưa thể ghi Google Sheet. Vui lòng bổ sung: ${missing.join(", ")}.`);
     return { handled: true, missing };
   }
   if (!googleSheetsWriteEnabled) {
     updateProcessing(record, { sheet: { status: "paused", error: "GOOGLE_SHEETS_WRITE_ENABLED đang là false." }, confirmation: { status: "blocked" } });
-    await sendConfirmationResult(conversation, "Đã nhận Confirm nhưng hệ thống đang tắt ghi Google Sheet (GOOGLE_SHEETS_WRITE_ENABLED=false).");
+    await sendConfirmationResult(session, "Đã nhận Confirm nhưng hệ thống đang tắt ghi Google Sheet (GOOGLE_SHEETS_WRITE_ENABLED=false).");
     return { handled: true, blocked: true };
   }
   if (!googleSheets.isConfigured()) {
     updateProcessing(record, { sheet: { status: "not_configured", error: "Google Sheets OAuth chưa được cấu hình." }, confirmation: { status: "blocked" } });
-    await sendConfirmationResult(conversation, "Chưa thể ghi task vì Google Sheets OAuth chưa được cấu hình.");
+    await sendConfirmationResult(session, "Chưa thể ghi task vì Google Sheets OAuth chưa được cấu hình.");
     return { handled: true, blocked: true };
   }
   if (!googleSheets.isAuthorized()) {
     updateProcessing(record, { sheet: { status: "auth_required", error: "Chưa kết nối Google. Mở nút Kết nối Google trên website." }, confirmation: { status: "blocked" } });
-    await sendConfirmationResult(conversation, "Chưa thể ghi task vì bot chưa được kết nối Google Sheets.");
+    await sendConfirmationResult(session, "Chưa thể ghi task vì bot chưa được kết nối Google Sheets.");
     return { handled: true, blocked: true };
   }
 
   updateProcessing(record, { sheet: { status: "writing", error: "" }, confirmation: { status: "writing", error: "" } });
   try {
-    const isUpdate = Boolean(conversation.rowNumber);
-    const result = conversation.rowNumber
-      ? await googleSheets.updateTask(conversation.rowNumber, { ...draft, id: conversation.taskId })
+    const result = task.rowNumber
+      ? await googleSheets.updateTask(task.rowNumber, { ...draft, id: task.taskId })
       : await googleSheets.appendTask(draft);
-    conversation.rowNumber = result.rowNumber;
-    conversation.taskId = result.taskId;
-    conversation.written = true;
+    task.rowNumber = result.rowNumber;
+    task.taskId = result.taskId;
+    task.written = true;
     confirmationDrafts.delete(value);
     let notificationError = "";
     try {
-      await sendTaskAssignmentNotification(conversation, draft);
+      const notification = await sendTaskAssignmentNotification(task, { ...draft, taskId: result.taskId });
+      task.assignmentMessageId = notification?.message_id || null;
+      rememberSheetMessage(task.assignmentMessageId, result.taskId);
     } catch (notificationException) {
       notificationError = notificationException.message;
       console.error("SeaTalk PIC notification failed:", notificationError);
     }
-    const confirmationCardError = await updateConfirmationCardAfterConfirm(conversation, draft);
+    const confirmationCardError = await updateConfirmationCardAfterConfirm(task, draft);
     const confirmationError = [notificationError, confirmationCardError].filter(Boolean).join(" ");
+    const confirmationMessageId = task.confirmationMessageId;
+    task.confirmationValue = null;
     updateProcessing(record, {
       sheet: { status: "written", rowNumber: result.rowNumber, updatedRange: result.updatedRange },
       extraction: { taskId: result.taskId, updatedAt: draft.updatedAt },
-      confirmation: { status: "confirmed", draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: confirmationError },
+      confirmation: { status: "confirmed", draftId: task.draftId, messageId: confirmationMessageId, error: confirmationError },
     });
     return { handled: true, written: true };
   } catch (error) {
     updateProcessing(record, { sheet: { status: "failed", error: error.message }, confirmation: { status: "failed", error: error.message } });
-    await sendConfirmationResult(conversation, `Ghi Google Sheet thất bại: ${error.message}`);
+    await sendConfirmationResult(session, `Ghi Google Sheet thất bại: ${error.message}`);
     return { handled: true, error: error.message };
   }
 }
@@ -613,62 +1000,41 @@ async function confirmTaskInternal(value, clickRecord, pending, conversation) {
 async function confirmTask(value, clickRecord) {
   const pending = confirmationDrafts.get(value);
   if (!pending) return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
-  const conversation = conversations.get(pending.key);
-  if (!conversation || conversation.draftId !== pending.draftId) {
+  const session = threadSessions.get(pending.threadKey);
+  const task = session?.tasks.get(pending.shortId);
+  if (!session || !task || task.draftId !== pending.draftId) {
     return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
   }
-  if (conversation.confirmPromise) return conversation.confirmPromise;
-  const promise = confirmTaskInternal(value, clickRecord, pending, conversation);
-  conversation.confirmPromise = promise;
+  if (task.confirmPromise) return task.confirmPromise;
+  const promise = confirmTaskInternal(value, clickRecord, pending, session, task);
+  task.confirmPromise = promise;
   try {
     return await promise;
   } finally {
-    if (conversation.confirmPromise === promise) conversation.confirmPromise = null;
+    if (task.confirmPromise === promise) task.confirmPromise = null;
   }
 }
 
-async function updateDraftFieldAndRedrawInternal(action, clickRecord, pending, conversation) {
-  if (!isConfirmationClickAuthorized(clickRecord, conversation)) {
+async function updateDraftFieldAndRedrawInternal(action, clickRecord, pending, session, task) {
+  if (!isConfirmationClickAuthorized(clickRecord, task)) {
     return { handled: true, ignored: true };
   }
-  if (conversation.written && conversation.rowNumber) return { handled: true, alreadyWritten: true };
+  if (task.written && task.rowNumber) return { handled: true, alreadyWritten: true };
 
-  const record = messages.find((item) => item.id === conversation.recordId) || clickRecord;
+  const record = messages.find((item) => item.id === task.recordId) || clickRecord;
   const nextValue = action.kind === "priority"
     ? action.value
     : resolveDeadlineQuickPick(action.value);
   if (!nextValue) return { handled: false, error: "Giá trị cập nhật không hợp lệ." };
 
-  conversation.fields = {
-    ...(conversation.fields || {}),
+  task.fields = {
+    ...(task.fields || {}),
     [action.kind === "priority" ? "priority" : "deadline"]: nextValue,
   };
-  conversation.lastActivityAt = new Date().toISOString();
-  const draft = draftFromFields(conversation.fields, conversation, record);
-  const message = buildConfirmationMessage(draft, conversation.confirmationValue);
-
-  try {
-    if (!conversation.confirmationMessageId) throw new Error("Thiếu message_id của card xác nhận để cập nhật.");
-    await seatalk.updateInteractiveMessage(conversation.confirmationMessageId, message);
-    updateProcessing(record, {
-      extraction: {
-        deadline: draft.deadline,
-        priority: draft.priority,
-        updatedAt: draft.updatedAt,
-      },
-      confirmation: {
-        status: "sent",
-        draftId: conversation.draftId,
-        messageId: conversation.confirmationMessageId,
-        error: "",
-      },
-    });
-    return { handled: true, updated: true };
-  } catch (error) {
-    console.error("SeaTalk confirmation card update failed; resending:", error.message);
-    await sendConfirmationCard(record, conversation, draft);
-    return { handled: true, updated: false, resent: true, error: error.message };
-  }
+  task.lastActivityAt = new Date().toISOString();
+  const draft = draftFromFields(task.fields, task, record);
+  await redrawConfirmationCard(record, session, task, draft);
+  return { handled: true, updated: true };
 }
 
 async function updateDraftFieldAndRedraw(value, clickRecord) {
@@ -680,18 +1046,69 @@ async function updateDraftFieldAndRedraw(value, clickRecord) {
   const confirmationValue = `task:confirm:${action.draftId}`;
   const pending = confirmationDrafts.get(confirmationValue);
   if (!pending) return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
-  const conversation = conversations.get(pending.key);
-  if (!conversation || conversation.draftId !== pending.draftId) {
+  const session = threadSessions.get(pending.threadKey);
+  const task = session?.tasks.get(pending.shortId);
+  if (!session || !task || task.draftId !== pending.draftId) {
     return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
   }
-  if (conversation.fieldUpdatePromise) return conversation.fieldUpdatePromise;
+  if (task.fieldUpdatePromise) return task.fieldUpdatePromise;
 
-  const promise = updateDraftFieldAndRedrawInternal(action, clickRecord, pending, conversation);
-  conversation.fieldUpdatePromise = promise;
+  const promise = updateDraftFieldAndRedrawInternal(action, clickRecord, pending, session, task);
+  task.fieldUpdatePromise = promise;
   try {
     return await promise;
   } finally {
-    if (conversation.fieldUpdatePromise === promise) conversation.fieldUpdatePromise = null;
+    if (task.fieldUpdatePromise === promise) task.fieldUpdatePromise = null;
+  }
+}
+
+function findPendingClarification(clarifyId) {
+  for (const session of threadSessions.values()) {
+    const clarification = session.pendingClarifications.get(clarifyId);
+    if (clarification) return { session, clarification };
+  }
+  return null;
+}
+
+async function handleClarificationInternal(action, clickRecord, session, clarification) {
+  if (!isClarificationClickAuthorized(clickRecord, clarification)) {
+    return { handled: true, ignored: true };
+  }
+
+  const record = messages.find((item) => item.id === clarification.recordId);
+  if (!record) return { handled: false, error: "Tin nhắn cần chọn task không còn tồn tại." };
+
+  const task = action.kind === "clarify_new"
+    ? createNewTask(session, record)
+    : session.tasks.get(action.shortId);
+  if (!task) return { handled: false, error: "Task được chọn không còn tồn tại trong thread." };
+
+  if (action.kind === "clarify_target" && !isTaskMessageUpdateAuthorized(record, task)) {
+    return { handled: true, ignored: true };
+  }
+
+  await processTaskForTask(record, session, task);
+  return { handled: true, taskShortId: task.shortId };
+}
+
+async function handleClarification(value, clickRecord) {
+  const action = parseConfirmationButtonValue(value);
+  if (!action || (action.kind !== "clarify_new" && action.kind !== "clarify_target")) {
+    return { handled: false, error: "Nút chọn task không hợp lệ." };
+  }
+
+  const pending = findPendingClarification(action.clarifyId);
+  if (!pending) return { handled: false, error: "Lựa chọn task không còn tồn tại hoặc đã được thay thế." };
+  const { session, clarification } = pending;
+  if (clarification.promise) return clarification.promise;
+
+  const promise = handleClarificationInternal(action, clickRecord, session, clarification);
+  clarification.promise = promise;
+  try {
+    return await promise;
+  } finally {
+    if (clarification.promise === promise) clarification.promise = null;
+    session.pendingClarifications.delete(clarification.clarifyId);
   }
 }
 
@@ -762,6 +1179,14 @@ async function handleGoogleCallback(url, response) {
   }
 }
 
+function shouldProcessMessage(record) {
+  if (record?.parsed?.kind !== "message") return false;
+  if (record.parsed.eventType === "new_message_received_from_thread") {
+    return Boolean(record.parsed.quotedMessageId || detectTaskIntent(record.parsed.text));
+  }
+  return true;
+}
+
 async function handleWebhook(request, response) {
   let rawBody;
   try {
@@ -791,7 +1216,7 @@ async function handleWebhook(request, response) {
   }
 
   const { record, duplicate } = addMessage(payload);
-  if (!duplicate && record.parsed.kind === "message") {
+  if (!duplicate && shouldProcessMessage(record)) {
     void processTask(record);
   }
   if (!duplicate && record.parsed.kind === "interaction") {
@@ -800,10 +1225,19 @@ async function handleWebhook(request, response) {
     if (action?.kind === "priority" || action?.kind === "deadline") {
       void updateDraftFieldAndRedraw(record.parsed.buttonValue, record);
     }
+    if (action?.kind === "clarify_new" || action?.kind === "clarify_target") {
+      void handleClarification(record.parsed.buttonValue, record);
+    }
+    if (action?.kind === "sheet_update_priority" || action?.kind === "sheet_update_deadline") {
+      void updateSheetUpdateDraft(record.parsed.buttonValue, record);
+    }
+    if (action?.kind === "sheet_update_confirm") {
+      void confirmSheetUpdate(record.parsed.buttonValue, record);
+    }
   }
   if (
     duplicate &&
-    record.parsed.kind === "message" &&
+    shouldProcessMessage(record) &&
     record.processing?.sheet?.status === "failed" &&
     googleSheetsWriteEnabled
   ) {

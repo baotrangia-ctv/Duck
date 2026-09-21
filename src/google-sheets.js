@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { findMatchingSheetTasks, sheetRowToTask } from "./sheet-task-updates.js";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -224,6 +225,24 @@ class GoogleSheetsClient {
     }
     const data = await response.json();
     return Array.isArray(data.values) ? data.values : [];
+  }
+
+  async findTaskById(taskId) {
+    const normalizedId = String(taskId ?? "").trim();
+    if (!/^\d+$/.test(normalizedId)) return null;
+    const token = await this.getAccessToken();
+    const values = await this.readValues(`${this.sheetName}!A2:H`, token);
+    for (let index = 0; index < values.length; index += 1) {
+      const task = sheetRowToTask(values[index], index + 2);
+      if (task && String(task.id) === normalizedId) return task;
+    }
+    return null;
+  }
+
+  async findTasksByText(query, maxResults = 10) {
+    const token = await this.getAccessToken();
+    const values = await this.readValues(`${this.sheetName}!A2:H`, token);
+    return findMatchingSheetTasks(values, query, maxResults);
   }
 
   async nextTaskId(token) {
