@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { createTaskExtractor } from "./src/task-extractor.js";
 import { GoogleSheetsClient } from "./src/google-sheets.js";
-import { SeaTalkClient, buildConfirmationMessage, buildConfirmationText, buildTaskAssignmentMessage } from "./src/seatalk.js";
+import { SeaTalkClient, buildConfirmationMessage, buildConfirmationSuccessMessage, buildTaskAssignmentMessage } from "./src/seatalk.js";
+import { isConfirmationClickAuthorized } from "./src/confirmation-auth.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(root, "public");
@@ -140,13 +141,15 @@ function parseSeaTalkEvent(payload) {
     "";
 
   if (eventType === "interactive_message_click") {
-    const clicker = event?.clicker || event?.sender || event?.user || {};
+    const clicker = event?.clicker || event?.sender || event?.user || event;
     return {
       kind: "interaction",
       title: `Bấm nút ${event?.button_value || event?.value || "interactive"}`,
       sender: clicker.name || clicker.employee_code || clicker.seatalk_id || "Không rõ người dùng",
-      senderId: clicker.seatalk_id || clicker.employee_code || event?.employee_code || null,
+      senderId: clicker.seatalk_id || event?.seatalk_id || clicker.employee_code || event?.employee_code || null,
+      seatalkId: clicker.seatalk_id || event?.seatalk_id || null,
       employeeCode: clicker.employee_code || event?.employee_code || null,
+      email: clicker.email || event?.email || null,
       messageId: event?.message_id || event?.message?.message_id || null,
       buttonValue: event?.button_value || event?.value || event?.button?.value || "",
       eventType,
@@ -166,7 +169,9 @@ function parseSeaTalkEvent(payload) {
       text: typeof text === "string" ? text.trim() : "",
       sender: sender.name || event.employee_name || event.sender_name || event.employee_code || sender.employee_code || "Không rõ người gửi",
       senderId: sender.seatalk_id || event.seatalk_id || event.sender_id || sender.employee_code || event.employee_code || null,
+      seatalkId: sender.seatalk_id || event.seatalk_id || null,
       employeeCode: sender.employee_code || event.employee_code || null,
+      email: sender.email || event.email || null,
       messageId,
       groupId: event.group_id || event.group?.group_id || null,
       threadId: event.thread_id || message.thread_id || event.thread?.thread_id || message.thread?.thread_id || (event.group_id || event.group?.group_id ? messageId : null),
@@ -266,13 +271,9 @@ function conversationKey(parsed) {
   return null;
 }
 
-function isConfirmRequest(text) {
-  return /^(?:\s*@[^\s]+\s*)?(?:confirm|xác\s+nhận|ok|đồng\s+ý)\s*[.!]?\s*$/i.test(String(text || "").trim());
-}
-
 function isDraftRevisionRequest(text) {
   const value = String(text || "").normalize("NFC").trim();
-  if (!value || isConfirmRequest(value)) return false;
+  if (!value) return false;
   if (/\b(?:tạo|tao|create|new)\s+(?:task|công việc)\b/i.test(value)) return false;
   const fieldMentioned = /\b(?:priority|p0|p1|p2|ưu tiên|mức độ ưu tiên|độ ưu tiên|deadline|hạn(?: chót| hoàn thành)?|due date|pic|người phụ trách|phụ trách|giao cho|status|trạng thái)\b/i.test(value);
   const revisionLanguage = /\b(?:chỉnh|chinh|đổi|doi|sửa|sua|update|cập nhật|cap nhat|thay|set|change|thành|là|sang|về|to)\b/i.test(value);
@@ -355,6 +356,9 @@ function createConversation(record) {
     taskId: null,
     confirmationValue: null,
     confirmationMessageId: null,
+    creatorEmail: record.parsed.email || null,
+    creatorEmployeeCode: record.parsed.employeeCode || null,
+    creatorSeatalkId: record.parsed.seatalkId || null,
     picEmployeeCode: null,
     written: false,
     lastActivityAt: record.timestamp || record.receivedAt,
@@ -417,35 +421,18 @@ async function sendConfirmationCard(record, conversation, draft, { skipSend = fa
   updateProcessing(record, { confirmation: { status: "sending", draftId: conversation.draftId, error: "" } });
   try {
     let result;
-    let confirmationStatus = "sent";
-    let confirmationError = "";
     if (conversation.target.groupId) {
       result = await seatalk.sendGroupChat(
         conversation.target.groupId,
-        buildConfirmationText(draft),
+        buildConfirmationMessage(draft, confirmationValue),
         conversation.target.threadId,
       );
-      if (conversation.target.employeeCode) {
-        try {
-          const directResult = await seatalk.sendSingleChat(
-            conversation.target.employeeCode,
-            buildConfirmationMessage(draft, confirmationValue),
-          );
-          result = directResult || result;
-        } catch (error) {
-          confirmationStatus = "sent_text_fallback";
-          confirmationError = `Card Confirm không gửi được vào chat riêng (${error.message}). Có thể reply Confirm trong thread.`;
-        }
-      } else {
-        confirmationStatus = "sent_text_fallback";
-        confirmationError = "Không lấy được employee_code người gửi để gửi card Confirm riêng. Reply Confirm trong thread.";
-      }
     } else {
       result = await seatalk.sendConfirmation(conversation.target, draft, confirmationValue);
     }
     conversation.confirmationMessageId = result?.message_id || null;
     updateProcessing(record, {
-      confirmation: { status: confirmationStatus, draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: confirmationError },
+      confirmation: { status: "sent", draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: "" },
     });
   } catch (error) {
     updateProcessing(record, {
@@ -536,7 +523,21 @@ async function sendTaskAssignmentNotification(conversation, draft) {
   return seatalk.sendSingleChat(employeeCode, buildTaskAssignmentMessage(draft));
 }
 
+async function sendConfirmationSuccessMessage(conversation) {
+  if (!conversation?.target?.groupId || !seatalk.isConfigured()) return "";
+  try {
+    await seatalk.sendReply(conversation.target, buildConfirmationSuccessMessage());
+    return "";
+  } catch (error) {
+    console.error("SeaTalk confirmation success message failed:", error.message);
+    return error.message;
+  }
+}
+
 async function confirmTaskInternal(value, clickRecord, pending, conversation) {
+  if (!isConfirmationClickAuthorized(clickRecord, conversation)) {
+    return { handled: true, ignored: true };
+  }
   if (conversation.written && conversation.rowNumber) return { handled: true, alreadyWritten: true };
 
   const record = messages.find((item) => item.id === conversation.recordId) || clickRecord;
@@ -583,10 +584,14 @@ async function confirmTaskInternal(value, clickRecord, pending, conversation) {
       notificationError = notificationException.message;
       console.error("SeaTalk PIC notification failed:", notificationError);
     }
+    const confirmationSuccessMessageError = notificationError
+      ? ""
+      : await sendConfirmationSuccessMessage(conversation);
+    const confirmationError = [notificationError, confirmationSuccessMessageError].filter(Boolean).join(" ");
     updateProcessing(record, {
       sheet: { status: "written", rowNumber: result.rowNumber, updatedRange: result.updatedRange },
       extraction: { taskId: result.taskId, updatedAt: draft.updatedAt },
-      confirmation: { status: "confirmed", draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: notificationError },
+      confirmation: { status: "confirmed", draftId: conversation.draftId, messageId: conversation.confirmationMessageId, error: confirmationError },
     });
     return { handled: true, written: true };
   } catch (error) {
@@ -710,12 +715,7 @@ async function handleWebhook(request, response) {
 
   const { record, duplicate } = addMessage(payload);
   if (!duplicate && record.parsed.kind === "message") {
-    const conversation = conversations.get(conversationKey(record.parsed));
-    if (conversation?.confirmationValue && isConfirmRequest(record.parsed.text)) {
-      void confirmTask(conversation.confirmationValue, record);
-    } else {
-      void processTask(record);
-    }
+    void processTask(record);
   }
   if (!duplicate && record.parsed.kind === "interaction") void confirmTask(record.parsed.buttonValue, record);
   if (

@@ -27,15 +27,17 @@ function buildConfirmationMessage(draft, confirmationValue) {
         },
         {
           element_type: "description",
-          description: { format: "2", text: description },
+          description: { format: 1, text: description },
         },
         {
-          element_type: "button",
-          button: {
-            button_type: "callback",
-            text: "Confirm",
-            value: confirmationValue,
-          },
+          element_type: "button_group",
+          button_group: [
+            {
+              button_type: "callback",
+              text: "Xác nhận",
+              value: confirmationValue,
+            },
+          ],
         },
       ],
     },
@@ -49,8 +51,6 @@ function buildConfirmationText(draft) {
     `Nội dung Task: ${fieldValue(draft.task)}`,
     `Deadline: ${fieldValue(draft.deadline)}`,
     `Priority: ${fieldValue(draft.priority)}`,
-    "",
-    "Vui lòng bấm Confirm trong tin nhắn riêng của bot hoặc reply `Confirm` trong thread này.",
   ].join("\n");
   return {
     tag: "text",
@@ -70,6 +70,13 @@ function buildTaskAssignmentMessage(draft) {
   return {
     tag: "text",
     text: { format: "2", content },
+  };
+}
+
+function buildConfirmationSuccessMessage() {
+  return {
+    tag: "text",
+    text: { format: 2, content: "✅ Đã gửi thông tin công việc cho PIC" },
   };
 }
 
@@ -144,10 +151,12 @@ class SeaTalkClient {
 
   async sendGroupChat(groupId, message, threadId = null) {
     if (!asNonEmptyString(groupId)) throw new Error("Thiếu group_id để gửi SeaTalk group chat.");
+    const groupMessage = asNonEmptyString(threadId)
+      ? { ...message, thread_id: threadId }
+      : message;
     return this.request("/messaging/v2/group_chat", {
       group_id: groupId,
-      ...(asNonEmptyString(threadId) ? { thread_id: threadId } : {}),
-      message,
+      message: groupMessage,
     });
   }
 
@@ -161,4 +170,4 @@ class SeaTalkClient {
   }
 }
 
-export { SeaTalkClient, buildConfirmationMessage, buildConfirmationText, buildTaskAssignmentMessage };
+export { SeaTalkClient, buildConfirmationMessage, buildConfirmationText, buildConfirmationSuccessMessage, buildTaskAssignmentMessage };

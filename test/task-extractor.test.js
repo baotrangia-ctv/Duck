@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
-import { SeaTalkClient, buildConfirmationMessage, buildTaskAssignmentMessage } from "../src/seatalk.js";
+import { isConfirmationClickAuthorized } from "../src/confirmation-auth.js";
+import { SeaTalkClient, buildConfirmationMessage, buildConfirmationSuccessMessage, buildTaskAssignmentMessage } from "../src/seatalk.js";
 
 test("parseTaskFields reads and normalizes the required JSON fields", () => {
   const result = parseTaskFields('{"pic":"an@example.com","deadline":"30/09","task":"Cập nhật dashboard","status":"DONE"}', "2026-09-19");
@@ -331,10 +332,72 @@ test("SeaTalk client sends a confirmation card to a single-chat recipient", asyn
   const body = JSON.parse(requests[0].options.body);
   assert.equal(body.employee_code, "517816");
   assert.equal(body.message.tag, "interactive_message");
-  assert.equal(body.message.interactive_message.elements[2].button.value, "task:confirm:draft-1");
+  assert.deepEqual(body.message.interactive_message.elements[2], {
+    element_type: "button_group",
+    button_group: [{
+      button_type: "callback",
+      text: "Xác nhận",
+      value: "task:confirm:draft-1",
+    }],
+  });
   assert.match(body.message.interactive_message.elements[1].description.text, /PIC: an@example.com/);
   assert.match(body.message.interactive_message.elements[1].description.text, /Deadline: 30\/09\/2026/);
   assert.equal(buildConfirmationMessage({ task: "x" }, "v").tag, "interactive_message");
+});
+
+test("SeaTalk sends an interactive confirmation into the source group thread", async () => {
+  const requests = [];
+  const client = new SeaTalkClient({
+    accessToken: "access-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ code: 0, message_id: "group-card-1" }) };
+    },
+  });
+
+  await client.sendGroupChat(
+    "group-1",
+    buildConfirmationMessage({ task: "Cập nhật dashboard" }, "task:confirm:draft-1"),
+    "thread-1",
+  );
+
+  const body = JSON.parse(requests[0].options.body);
+  assert.equal(requests[0].url, "https://openapi.seatalk.io/messaging/v2/group_chat");
+  assert.equal(body.group_id, "group-1");
+  assert.equal(body.message.thread_id, "thread-1");
+  assert.equal(body.message.interactive_message.elements[2].button_group[0].text, "Xác nhận");
+  assert.equal(body.message.interactive_message.elements[2].button_group[0].button_type, "callback");
+});
+
+test("SeaTalk builds the group-thread success message after PIC notification", () => {
+  assert.deepEqual(buildConfirmationSuccessMessage(), {
+    tag: "text",
+    text: { format: 2, content: "✅ Đã gửi thông tin công việc cho PIC" },
+  });
+});
+
+test("confirmation authorization allows the creator, rejects another identity, and fails open without clicker identity", () => {
+  const creator = {
+    creatorEmail: "creator@example.com",
+    creatorEmployeeCode: "517816",
+    creatorSeatalkId: "9252293287",
+  };
+
+  assert.equal(isConfirmationClickAuthorized({ parsed: {
+    email: "creator@example.com",
+    employeeCode: "different-code",
+    senderId: "different-seatalk-id",
+  } }, creator), true);
+  assert.equal(isConfirmationClickAuthorized({ parsed: {
+    email: "other@example.com",
+    employeeCode: "517816",
+    senderId: "9252293287",
+  } }, creator), false);
+  assert.equal(isConfirmationClickAuthorized({ parsed: {
+    email: null,
+    employeeCode: null,
+    senderId: null,
+  } }, creator), true);
 });
 
 test("SeaTalk builds a direct PIC assignment notification", () => {
