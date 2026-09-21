@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
 import { isConfirmationClickAuthorized } from "../src/confirmation-auth.js";
-import { SeaTalkClient, buildConfirmationMessage, buildConfirmationSuccessMessage, buildTaskAssignmentMessage } from "../src/seatalk.js";
+import {
+  SeaTalkClient,
+  buildConfirmationMessage,
+  buildConfirmedMessage,
+  buildTaskAssignmentMessage,
+  getDeadlineQuickPickOptions,
+} from "../src/seatalk.js";
+import { parseConfirmationButtonValue } from "../src/confirmation-routing.js";
 
 test("parseTaskFields reads and normalizes the required JSON fields", () => {
   const result = parseTaskFields('{"pic":"an@example.com","deadline":"30/09","task":"Cập nhật dashboard","status":"DONE"}', "2026-09-19");
@@ -332,16 +339,17 @@ test("SeaTalk client sends a confirmation card to a single-chat recipient", asyn
   const body = JSON.parse(requests[0].options.body);
   assert.equal(body.employee_code, "517816");
   assert.equal(body.message.tag, "interactive_message");
-  assert.deepEqual(body.message.interactive_message.elements[2], {
-    element_type: "button_group",
-    button_group: [{
+  assert.deepEqual(body.message.interactive_message.elements[4], {
+    element_type: "button",
+    button: {
       button_type: "callback",
       text: "Xác nhận",
       value: "task:confirm:draft-1",
-    }],
+    },
   });
-  assert.match(body.message.interactive_message.elements[1].description.text, /PIC: an@example.com/);
-  assert.match(body.message.interactive_message.elements[1].description.text, /Deadline: 30\/09\/2026/);
+  assert.match(body.message.interactive_message.elements[1].description.text, /\*\*PIC:\*\* an@example.com/);
+  assert.match(body.message.interactive_message.elements[1].description.text, /\*\*Deadline:\*\* 30\/09\/2026/);
+  assert.equal(body.message.interactive_message.elements[1].description.format, 1);
   assert.equal(buildConfirmationMessage({ task: "x" }, "v").tag, "interactive_message");
 });
 
@@ -365,15 +373,85 @@ test("SeaTalk sends an interactive confirmation into the source group thread", a
   assert.equal(requests[0].url, "https://openapi.seatalk.io/messaging/v2/group_chat");
   assert.equal(body.group_id, "group-1");
   assert.equal(body.message.thread_id, "thread-1");
-  assert.equal(body.message.interactive_message.elements[2].button_group[0].text, "Xác nhận");
-  assert.equal(body.message.interactive_message.elements[2].button_group[0].button_type, "callback");
+  assert.equal(body.message.interactive_message.elements[4].button.text, "Xác nhận");
+  assert.equal(body.message.interactive_message.elements[4].button.button_type, "callback");
 });
 
-test("SeaTalk builds the group-thread success message after PIC notification", () => {
-  assert.deepEqual(buildConfirmationSuccessMessage(), {
-    tag: "text",
-    text: { format: 2, content: "✅ Đã gửi thông tin công việc cho PIC" },
+test("SeaTalk confirmation card marks the current priority and exposes deadline quick picks", () => {
+  const tomorrow = getDeadlineQuickPickOptions()[1].date;
+  const message = buildConfirmationMessage({
+    pic: "an@example.com",
+    task: "Cập nhật dashboard",
+    deadline: tomorrow,
+    priority: "P1",
+  }, "task:confirm:draft-1");
+  const elements = message.interactive_message.elements;
+
+  assert.equal(elements[1].description.format, 1);
+  assert.match(elements[1].description.text, /^\*\*PIC:\*\*/);
+  assert.match(elements[1].description.text, /\*\*Nội dung Task:\*\* Cập nhật dashboard/);
+  assert.equal(elements[2].button_group.length, 3);
+  assert.deepEqual(elements[2].button_group.map((button) => button.value), [
+    "task:deadline:draft-1:today",
+    "task:deadline:draft-1:tomorrow",
+    "task:deadline:draft-1:weekend",
+  ]);
+  assert.match(elements[2].button_group[1].text, /^✅ /);
+  assert.deepEqual(elements[3].button_group.map((button) => button.text), ["P0", "✅ P1", "P2"]);
+});
+
+test("SeaTalk builds a confirmed card with only the final button", () => {
+  const message = buildConfirmedMessage({
+    pic: "an@example.com",
+    task: "Cập nhật dashboard",
+    deadline: "30/09/2026",
+    priority: "P1",
+  }, "draft-1");
+  const elements = message.interactive_message.elements;
+
+  assert.equal(elements.length, 3);
+  assert.equal(elements[2].element_type, "button");
+  assert.equal(elements[2].button.text, "✅ Đã gửi thông tin công việc cho PIC");
+  assert.equal(elements[2].button.value, "task:confirmed:draft-1");
+});
+
+test("SeaTalk client updates an interactive message in place", async () => {
+  const requests = [];
+  const client = new SeaTalkClient({
+    accessToken: "access-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ code: 0 }) };
+    },
   });
+  const message = buildConfirmationMessage({ task: "Updated" }, "task:confirm:draft-1");
+  await client.updateInteractiveMessage("message-1", message);
+
+  assert.equal(requests[0].url, "https://openapi.seatalk.io/messaging/v2/update");
+  assert.deepEqual(JSON.parse(requests[0].options.body), { message_id: "message-1", message });
+});
+
+test("confirmation button routing separates confirm, priority, and deadline actions", () => {
+  assert.deepEqual(parseConfirmationButtonValue("task:confirm:draft-1"), {
+    kind: "confirm",
+    draftId: "draft-1",
+  });
+  assert.deepEqual(parseConfirmationButtonValue("task:confirmed:draft-1"), {
+    kind: "confirmed",
+    draftId: "draft-1",
+  });
+  assert.deepEqual(parseConfirmationButtonValue("task:priority:draft-1:P1"), {
+    kind: "priority",
+    draftId: "draft-1",
+    value: "P1",
+  });
+  assert.deepEqual(parseConfirmationButtonValue("task:deadline:draft-1:+7d"), {
+    kind: "deadline",
+    draftId: "draft-1",
+    value: "+7d",
+  });
+  assert.equal(parseConfirmationButtonValue("task:priority:draft-1:P3"), null);
+  assert.equal(parseConfirmationButtonValue("other:confirm:draft-1"), null);
 });
 
 test("confirmation authorization allows the creator, rejects another identity, and fails open without clicker identity", () => {

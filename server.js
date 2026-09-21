@@ -5,8 +5,15 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { createTaskExtractor } from "./src/task-extractor.js";
 import { GoogleSheetsClient } from "./src/google-sheets.js";
-import { SeaTalkClient, buildConfirmationMessage, buildConfirmationSuccessMessage, buildTaskAssignmentMessage } from "./src/seatalk.js";
+import {
+  SeaTalkClient,
+  buildConfirmationMessage,
+  buildConfirmedMessage,
+  buildTaskAssignmentMessage,
+  resolveDeadlineQuickPick,
+} from "./src/seatalk.js";
 import { isConfirmationClickAuthorized } from "./src/confirmation-auth.js";
+import { parseConfirmationButtonValue } from "./src/confirmation-routing.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(root, "public");
@@ -356,6 +363,7 @@ function createConversation(record) {
     taskId: null,
     confirmationValue: null,
     confirmationMessageId: null,
+    fieldUpdatePromise: null,
     creatorEmail: record.parsed.email || null,
     creatorEmployeeCode: record.parsed.employeeCode || null,
     creatorSeatalkId: record.parsed.seatalkId || null,
@@ -523,13 +531,16 @@ async function sendTaskAssignmentNotification(conversation, draft) {
   return seatalk.sendSingleChat(employeeCode, buildTaskAssignmentMessage(draft));
 }
 
-async function sendConfirmationSuccessMessage(conversation) {
-  if (!conversation?.target?.groupId || !seatalk.isConfigured()) return "";
+async function updateConfirmationCardAfterConfirm(conversation, draft) {
+  if (!conversation?.confirmationMessageId || !seatalk.isConfigured()) return "";
   try {
-    await seatalk.sendReply(conversation.target, buildConfirmationSuccessMessage());
+    await seatalk.updateInteractiveMessage(
+      conversation.confirmationMessageId,
+      buildConfirmedMessage(draft, conversation.draftId),
+    );
     return "";
   } catch (error) {
-    console.error("SeaTalk confirmation success message failed:", error.message);
+    console.error("SeaTalk confirmed card update failed:", error.message);
     return error.message;
   }
 }
@@ -584,10 +595,8 @@ async function confirmTaskInternal(value, clickRecord, pending, conversation) {
       notificationError = notificationException.message;
       console.error("SeaTalk PIC notification failed:", notificationError);
     }
-    const confirmationSuccessMessageError = notificationError
-      ? ""
-      : await sendConfirmationSuccessMessage(conversation);
-    const confirmationError = [notificationError, confirmationSuccessMessageError].filter(Boolean).join(" ");
+    const confirmationCardError = await updateConfirmationCardAfterConfirm(conversation, draft);
+    const confirmationError = [notificationError, confirmationCardError].filter(Boolean).join(" ");
     updateProcessing(record, {
       sheet: { status: "written", rowNumber: result.rowNumber, updatedRange: result.updatedRange },
       extraction: { taskId: result.taskId, updatedAt: draft.updatedAt },
@@ -615,6 +624,74 @@ async function confirmTask(value, clickRecord) {
     return await promise;
   } finally {
     if (conversation.confirmPromise === promise) conversation.confirmPromise = null;
+  }
+}
+
+async function updateDraftFieldAndRedrawInternal(action, clickRecord, pending, conversation) {
+  if (!isConfirmationClickAuthorized(clickRecord, conversation)) {
+    return { handled: true, ignored: true };
+  }
+  if (conversation.written && conversation.rowNumber) return { handled: true, alreadyWritten: true };
+
+  const record = messages.find((item) => item.id === conversation.recordId) || clickRecord;
+  const nextValue = action.kind === "priority"
+    ? action.value
+    : resolveDeadlineQuickPick(action.value);
+  if (!nextValue) return { handled: false, error: "Giá trị cập nhật không hợp lệ." };
+
+  conversation.fields = {
+    ...(conversation.fields || {}),
+    [action.kind === "priority" ? "priority" : "deadline"]: nextValue,
+  };
+  conversation.lastActivityAt = new Date().toISOString();
+  const draft = draftFromFields(conversation.fields, conversation, record);
+  const message = buildConfirmationMessage(draft, conversation.confirmationValue);
+
+  try {
+    if (!conversation.confirmationMessageId) throw new Error("Thiếu message_id của card xác nhận để cập nhật.");
+    await seatalk.updateInteractiveMessage(conversation.confirmationMessageId, message);
+    updateProcessing(record, {
+      extraction: {
+        deadline: draft.deadline,
+        priority: draft.priority,
+        updatedAt: draft.updatedAt,
+      },
+      confirmation: {
+        status: "sent",
+        draftId: conversation.draftId,
+        messageId: conversation.confirmationMessageId,
+        error: "",
+      },
+    });
+    return { handled: true, updated: true };
+  } catch (error) {
+    console.error("SeaTalk confirmation card update failed; resending:", error.message);
+    await sendConfirmationCard(record, conversation, draft);
+    return { handled: true, updated: false, resent: true, error: error.message };
+  }
+}
+
+async function updateDraftFieldAndRedraw(value, clickRecord) {
+  const action = parseConfirmationButtonValue(value);
+  if (!action || (action.kind !== "priority" && action.kind !== "deadline")) {
+    return { handled: false, error: "Nút cập nhật draft không hợp lệ." };
+  }
+
+  const confirmationValue = `task:confirm:${action.draftId}`;
+  const pending = confirmationDrafts.get(confirmationValue);
+  if (!pending) return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
+  const conversation = conversations.get(pending.key);
+  if (!conversation || conversation.draftId !== pending.draftId) {
+    return { handled: false, error: "Draft xác nhận không còn tồn tại hoặc đã được thay thế." };
+  }
+  if (conversation.fieldUpdatePromise) return conversation.fieldUpdatePromise;
+
+  const promise = updateDraftFieldAndRedrawInternal(action, clickRecord, pending, conversation);
+  conversation.fieldUpdatePromise = promise;
+  try {
+    return await promise;
+  } finally {
+    if (conversation.fieldUpdatePromise === promise) conversation.fieldUpdatePromise = null;
   }
 }
 
@@ -717,7 +794,13 @@ async function handleWebhook(request, response) {
   if (!duplicate && record.parsed.kind === "message") {
     void processTask(record);
   }
-  if (!duplicate && record.parsed.kind === "interaction") void confirmTask(record.parsed.buttonValue, record);
+  if (!duplicate && record.parsed.kind === "interaction") {
+    const action = parseConfirmationButtonValue(record.parsed.buttonValue);
+    if (action?.kind === "confirm") void confirmTask(record.parsed.buttonValue, record);
+    if (action?.kind === "priority" || action?.kind === "deadline") {
+      void updateDraftFieldAndRedraw(record.parsed.buttonValue, record);
+    }
+  }
   if (
     duplicate &&
     record.parsed.kind === "message" &&

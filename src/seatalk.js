@@ -9,12 +9,72 @@ function fieldValue(value) {
   return asNonEmptyString(value) || "Chưa xác định";
 }
 
+function isoDateFromVietnamTime(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function addDays(isoDate, days) {
+  const date = new Date(`${isoDate}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDeadlineDate(isoDate) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(`${isoDate}T12:00:00Z`));
+}
+
+function getDeadlineQuickPickOptions(now = new Date()) {
+  const today = isoDateFromVietnamTime(now);
+  const dayOfWeek = new Date(`${today}T12:00:00Z`).getUTCDay();
+  const endOfWeek = addDays(today, (7 - dayOfWeek) % 7);
+  return [
+    { value: "today", label: "Hôm nay", date: formatDeadlineDate(today) },
+    { value: "tomorrow", label: "Ngày mai", date: formatDeadlineDate(addDays(today, 1)) },
+    { value: "weekend", label: "Cuối tuần này", date: formatDeadlineDate(endOfWeek) },
+    { value: "+7d", label: "+7 ngày", date: formatDeadlineDate(addDays(today, 7)) },
+  ];
+}
+
+function resolveDeadlineQuickPick(value, now = new Date()) {
+  return getDeadlineQuickPickOptions(now).find((option) => option.value === value)?.date || null;
+}
+
+function confirmationDraftId(confirmationValue) {
+  const parts = String(confirmationValue || "").split(":");
+  return parts[0] === "task" && parts[1] === "confirm" && parts[2]
+    ? parts[2]
+    : String(confirmationValue || "draft");
+}
+
 function buildConfirmationMessage(draft, confirmationValue) {
+  const draftId = confirmationDraftId(confirmationValue);
+  const deadline = fieldValue(draft.deadline);
+  // SeaTalk allows at most two button_group elements per interactive message.
+  // Keep three useful quick picks in one group; free-form deadline edits remain supported.
+  const deadlineOptions = getDeadlineQuickPickOptions().slice(0, 3);
+  const priority = String(draft.priority || "").trim().toUpperCase();
+  const deadlineButtons = deadlineOptions.map((option) => ({
+    button_type: "callback",
+    text: `${option.date === deadline ? "✅ " : ""}${option.label}`,
+    value: `task:deadline:${draftId}:${option.value}`,
+  }));
   const description = [
-    `PIC: ${fieldValue(draft.pic)}`,
-    `Nội dung Task: ${fieldValue(draft.task)}`,
-    `Deadline: ${fieldValue(draft.deadline)}`,
-    `Priority: ${fieldValue(draft.priority)}`,
+    `**PIC:** ${fieldValue(draft.pic)}`,
+    `**Nội dung Task:** ${fieldValue(draft.task)}`,
+    `**Deadline:** ${deadline}`,
+    `**Priority:** ${fieldValue(draft.priority)}`,
   ].join("\n");
 
   return {
@@ -31,13 +91,58 @@ function buildConfirmationMessage(draft, confirmationValue) {
         },
         {
           element_type: "button_group",
+          button_group: deadlineButtons,
+        },
+        {
+          element_type: "button_group",
           button_group: [
-            {
+            ...["P0", "P1", "P2"].map((option) => ({
               button_type: "callback",
-              text: "Xác nhận",
-              value: confirmationValue,
-            },
+              text: `${option === priority ? "✅ " : ""}${option}`,
+              value: `task:priority:${draftId}:${option}`,
+            })),
           ],
+        },
+        {
+          element_type: "button",
+          button: {
+            button_type: "callback",
+            text: "Xác nhận",
+            value: confirmationValue,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function buildConfirmedMessage(draft, draftId) {
+  const description = [
+    `**PIC:** ${fieldValue(draft.pic)}`,
+    `**Nội dung Task:** ${fieldValue(draft.task)}`,
+    `**Deadline:** ${fieldValue(draft.deadline)}`,
+    `**Priority:** ${fieldValue(draft.priority)}`,
+  ].join("\n");
+
+  return {
+    tag: "interactive_message",
+    interactive_message: {
+      elements: [
+        {
+          element_type: "title",
+          title: { text: "Xác nhận task" },
+        },
+        {
+          element_type: "description",
+          description: { format: 1, text: description },
+        },
+        {
+          element_type: "button",
+          button: {
+            button_type: "callback",
+            text: "✅ Đã gửi thông tin công việc cho PIC",
+            value: `task:confirmed:${draftId}`,
+          },
         },
       ],
     },
@@ -70,13 +175,6 @@ function buildTaskAssignmentMessage(draft) {
   return {
     tag: "text",
     text: { format: "2", content },
-  };
-}
-
-function buildConfirmationSuccessMessage() {
-  return {
-    tag: "text",
-    text: { format: 2, content: "✅ Đã gửi thông tin công việc cho PIC" },
   };
 }
 
@@ -160,6 +258,14 @@ class SeaTalkClient {
     });
   }
 
+  async updateInteractiveMessage(messageId, message) {
+    if (!asNonEmptyString(messageId)) throw new Error("Thiếu message_id để cập nhật SeaTalk interactive message.");
+    return this.request("/messaging/v2/update", {
+      message_id: messageId,
+      message,
+    });
+  }
+
   async sendReply({ employeeCode = null, groupId = null, threadId = null }, message) {
     if (groupId) return this.sendGroupChat(groupId, message, threadId);
     return this.sendSingleChat(employeeCode, message);
@@ -170,4 +276,12 @@ class SeaTalkClient {
   }
 }
 
-export { SeaTalkClient, buildConfirmationMessage, buildConfirmationText, buildConfirmationSuccessMessage, buildTaskAssignmentMessage };
+export {
+  SeaTalkClient,
+  buildConfirmationMessage,
+  buildConfirmedMessage,
+  buildConfirmationText,
+  buildTaskAssignmentMessage,
+  getDeadlineQuickPickOptions,
+  resolveDeadlineQuickPick,
+};
