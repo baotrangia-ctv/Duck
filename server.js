@@ -23,7 +23,7 @@ import {
   isTaskMessageUpdateAuthorized,
 } from "./src/confirmation-auth.js";
 import { parseConfirmationButtonValue } from "./src/confirmation-routing.js";
-import { detectTaskIntent } from "./src/sheet-task-updates.js";
+import { detectTaskIntent, extractRequestedStatus, isStatusOnlyUpdate } from "./src/sheet-task-updates.js";
 import {
   createPendingClarification,
   createTask,
@@ -515,14 +515,18 @@ function createSheetUpdateDraft(record, sheetTask, { picEmployeeCode = null } = 
   return pending;
 }
 
-function applyNaturalSheetUpdate(record, pending) {
+function applyNaturalSheetUpdate(record, pending, intent = null) {
   const hints = extractPayloadHints(record.parsed.text, record.payload);
-  if (hints.deadline) pending.fields.deadline = hints.deadline;
+  if (intent?.fields?.deadline && hints.deadline) pending.fields.deadline = hints.deadline;
 
-  const priority = /\b(?:priority|uu tien|muc do uu tien|do uu tien)\b/i.test(record.parsed.text || "")
+  const priority = intent?.fields?.priority && /\b(?:priority|uu tien|muc do uu tien|do uu tien)\b/i.test(record.parsed.text || "")
     ? String(record.parsed.text || "").match(/\bP[0-2]\b/i)?.[0]?.toUpperCase()
     : null;
   if (priority) pending.fields.priority = priority;
+  if (intent?.fields?.status) {
+    const status = extractRequestedStatus(record.parsed.text);
+    if (status) pending.fields.status = status;
+  }
   return pending;
 }
 
@@ -554,7 +558,7 @@ async function sendSheetUpdateCard(record, pending) {
   }
 }
 
-async function processSheetTaskUpdateById(record, taskId) {
+async function processSheetTaskUpdateById(record, taskId, intent = null) {
   if (!googleSheetsWriteEnabled) {
     updateProcessing(record, { sheet: { status: "paused", error: "GOOGLE_SHEETS_WRITE_ENABLED đang là false." } });
     await sendSheetUpdateText(record, "Hệ thống đang tắt cập nhật Google Sheet.");
@@ -575,14 +579,56 @@ async function processSheetTaskUpdateById(record, taskId) {
     }
     if (!isSheetRowUpdateAuthorized(record, task)) {
       updateProcessing(record, { sheet: { status: "forbidden", error: "Chỉ PIC của task mới được cập nhật task đã ghi Sheet." } });
-      await sendSheetUpdateText(record, "Bạn không có quyền cập nhật task này. Chỉ PIC được ghi trong Sheet mới được đổi Priority/Deadline.");
+      await sendSheetUpdateText(record, "Bạn không có quyền cập nhật task này. Chỉ PIC được ghi trong Sheet mới được đổi Priority, Deadline hoặc Status.");
       return;
     }
-    const pending = applyNaturalSheetUpdate(record, createSheetUpdateDraft(record, task));
+    const pending = applyNaturalSheetUpdate(record, createSheetUpdateDraft(record, task), intent);
+    if (isStatusOnlyUpdate(intent)) {
+      sheetUpdateDrafts.delete(pending.updateId);
+      await updateSheetStatusImmediately(record, pending);
+      return;
+    }
     await sendSheetUpdateCard(record, pending);
   } catch (error) {
     updateProcessing(record, { sheet: { status: "failed", error: error.message } });
     await sendSheetUpdateText(record, `Tìm task trong Google Sheet thất bại: ${error.message}`);
+  }
+}
+
+async function updateSheetStatusImmediately(record, pending) {
+  const updatedAt = new Date().toISOString();
+  pending.fields.updatedAt = updatedAt;
+  updateProcessing(record, {
+    sheet: { status: "writing", rowNumber: pending.rowNumber, error: "" },
+    extraction: {
+      taskId: pending.taskId,
+      task: pending.fields.task,
+      taskContent: pending.fields.task,
+      pic: pending.fields.pic,
+      deadline: pending.fields.deadline,
+      priority: pending.fields.priority,
+      taskStatus: pending.fields.status,
+      updatedAt,
+    },
+    confirmation: { status: "updating", error: "" },
+  });
+  try {
+    const result = await googleSheets.updateTask(pending.rowNumber, { ...pending.fields, id: pending.taskId });
+    await sendSheetUpdateText(
+      record,
+      buildTaskAssignmentUpdatedMessage({ ...pending.fields, taskId: pending.taskId }).text.content,
+    );
+    updateProcessing(record, {
+      sheet: { status: "updated", rowNumber: result.rowNumber, updatedRange: result.updatedRange, error: "" },
+      extraction: { taskId: result.taskId, updatedAt },
+      confirmation: { status: "updated", draftId: null, messageId: null, error: "" },
+    });
+  } catch (error) {
+    updateProcessing(record, {
+      sheet: { status: "failed", error: error.message },
+      confirmation: { status: "failed", error: error.message },
+    });
+    await sendSheetUpdateText(record, `Cập nhật Status trong Google Sheet thất bại: ${error.message}`);
   }
 }
 
@@ -595,7 +641,12 @@ async function processSheetTaskUpdate(record, intent) {
     );
     return;
   }
-  await processSheetTaskUpdateById(record, intent.taskId);
+  if (intent.fields.status && !extractRequestedStatus(record.parsed.text)) {
+    await sendSheetUpdateText(record, "Vui lòng nêu Status mới: IN PROGRESS, DONE hoặc NOT DO.");
+    updateProcessing(record, { sheet: { status: "status_value_required" } });
+    return;
+  }
+  await processSheetTaskUpdateById(record, intent.taskId, intent);
 }
 
 async function updateSheetUpdateCard(pending, record) {
@@ -804,7 +855,7 @@ function detectReferencedTaskIntent(text, taskId) {
 }
 
 async function rejectUnsupportedSheetUpdate(record) {
-  await sendSheetUpdateText(record, "Phase 2 hiện chỉ hỗ trợ đổi Priority và Deadline. Status/PIC chưa được hỗ trợ.");
+  await sendSheetUpdateText(record, "Phase 2 hiện hỗ trợ đổi Priority, Deadline và Status. PIC chưa được hỗ trợ.");
   updateProcessing(record, { confirmation: { status: "unsupported_update" } });
 }
 
@@ -815,11 +866,16 @@ async function requireReferencedSheetTaskUpdate(record, taskId) {
     return;
   }
   if (intent?.intent !== "update_existing_sheet_task") {
-    await sendSheetUpdateText(record, "Hãy nêu rõ Priority hoặc Deadline cần đổi khi quote task, ví dụ: Đổi deadline sang thứ 4.");
+    await sendSheetUpdateText(record, "Hãy nêu rõ Priority, Deadline hoặc Status cần đổi khi quote task, ví dụ: Đổi status sang DONE.");
     updateProcessing(record, { sheet: { status: "update_fields_required" } });
     return;
   }
-  await processSheetTaskUpdateById(record, taskId);
+  if (intent.fields.status && !extractRequestedStatus(record.parsed.text)) {
+    await sendSheetUpdateText(record, "Vui lòng nêu Status mới: IN PROGRESS, DONE hoặc NOT DO.");
+    updateProcessing(record, { sheet: { status: "status_value_required" } });
+    return;
+  }
+  await processSheetTaskUpdateById(record, taskId, intent);
 }
 
 async function processTask(record, { skipSheet = false } = {}) {

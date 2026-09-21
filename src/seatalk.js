@@ -205,6 +205,7 @@ function buildSheetTaskUpdateDescription(draft) {
     `**Nội dung Task:** ${fieldValue(draft.task)}`,
     `**Deadline:** ${fieldValue(draft.deadline)}`,
     `**Priority:** ${fieldValue(draft.priority)}`,
+    `**Status:** ${fieldValue(draft.status || "IN PROGRESS")}`,
   ].join("\n");
 }
 

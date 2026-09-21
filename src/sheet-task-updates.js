@@ -9,8 +9,8 @@ function normalizeSearchText(value) {
     .trim();
 }
 
-const UPDATE_FIELD_PATTERN = /\b(?:priority|uu tien|muc do uu tien|do uu tien|p0|p1|p2|deadline|han(?: chot| hoan thanh)?|due date)\b/i;
-const UNSUPPORTED_FIELD_PATTERN = /\b(?:status|trang thai|pic|nguoi phu trach|phu trach|giao cho)\b/i;
+const UPDATE_FIELD_PATTERN = /\b(?:priority|uu tien|muc do uu tien|do uu tien|p0|p1|p2|deadline|han(?: chot| hoan thanh)?|due date|status|trang thai|done|not do|not done|in progress|hoan thanh|da xong|dang lam|dang thuc hien|chua xong)\b/i;
+const UNSUPPORTED_FIELD_PATTERN = /\b(?:pic|nguoi phu trach|phu trach|giao cho)\b/i;
 const UPDATE_VERB_PATTERN = /\b(?:doi|sua|update|cap nhat|chinh|thay|change|set)\b/i;
 
 function cleanTargetQuery(value) {
@@ -58,8 +58,26 @@ function detectTaskIntent(text) {
     fields: {
       priority: /\b(?:priority|uu tien|muc do uu tien|do uu tien|p0|p1|p2)\b/i.test(value),
       deadline: /\b(?:deadline|han(?: chot| hoan thanh)?|due date)\b/i.test(value),
+      status: /\b(?:status|trang thai|done|not do|not done|in progress|hoan thanh|da xong|dang lam|dang thuc hien|chua xong)\b/i.test(value),
     },
   };
+}
+
+function extractRequestedStatus(text) {
+  const value = normalizeSearchText(text);
+  if (/\b(?:not do|not done|khong lam|huy|cancel(?:led)?)\b/i.test(value)) return "NOT DO";
+  if (/\b(?:done|hoan thanh|da xong|completed?|finished?)\b/i.test(value)) return "DONE";
+  if (/\b(?:in progress|dang lam|dang thuc hien|chua xong)\b/i.test(value)) return "IN PROGRESS";
+  return null;
+}
+
+function isStatusOnlyUpdate(intent) {
+  return Boolean(
+    intent?.intent === "update_existing_sheet_task" &&
+    intent.fields?.status &&
+    !intent.fields?.priority &&
+    !intent.fields?.deadline,
+  );
 }
 
 function sheetRowToTask(row, rowNumber) {
@@ -104,6 +122,8 @@ function findMatchingSheetTasks(rows, query, maxResults = 10) {
 
 export {
   detectTaskIntent,
+  extractRequestedStatus,
+  isStatusOnlyUpdate,
   findMatchingSheetTasks,
   normalizeSearchText,
   sheetRowToTask,
