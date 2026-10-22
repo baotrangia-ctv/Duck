@@ -19,11 +19,17 @@ import {
 import {
   isClarificationClickAuthorized,
   isConfirmationClickAuthorized,
+  isSheetRowUpdateAuthorized as isSheetRowUpdateAuthorizedByEmail,
   isSheetUpdateClickAuthorized,
   isTaskMessageUpdateAuthorized,
 } from "./src/confirmation-auth.js";
 import { parseConfirmationButtonValue } from "./src/confirmation-routing.js";
-import { detectTaskIntent, extractRequestedStatus, isStatusOnlyUpdate } from "./src/sheet-task-updates.js";
+import {
+  detectTaskIntent,
+  extractRequestedStatus,
+  isStatusOnlyUpdate,
+  resolveSheetUpdatePicEmployeeCode,
+} from "./src/sheet-task-updates.js";
 import {
   createPendingClarification,
   createTask,
@@ -73,7 +79,7 @@ const taskExtractor = createTaskExtractor({
 const googleSheets = new GoogleSheetsClient({
   spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "",
   sheetName: process.env.GOOGLE_SHEETS_SHEET_NAME || "Sheet1",
-  range: process.env.GOOGLE_SHEETS_RANGE || "A:H",
+  range: process.env.GOOGLE_SHEETS_RANGE || "A:I",
   oauthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
   oauthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
   oauthRedirectUri: googleOAuthRedirectUri,
@@ -242,6 +248,7 @@ function initialProcessingState() {
       taskContent: null,
       priority: null,
       taskStatus: "IN PROGRESS",
+      creator: null,
       createdAt: null,
       updatedAt: null,
       error: "",
@@ -384,6 +391,7 @@ function draftFromFields(fields, task, record) {
     deadline: fields.deadline,
     priority: fields.priority,
     status: fields.status || "IN PROGRESS",
+    creator: normalizeEmail(task.creatorEmail) || "",
     createdAt,
     updatedAt: new Date().toISOString(),
   };
@@ -479,9 +487,19 @@ function sheetTaskTarget(record) {
 }
 
 function isSheetRowUpdateAuthorized(record, task) {
-  const requesterEmail = normalizeEmail(record?.parsed?.email);
-  const picEmail = normalizeEmail(task?.pic);
-  return Boolean(requesterEmail && picEmail && requesterEmail === picEmail);
+  return isSheetRowUpdateAuthorizedByEmail(record, task);
+}
+
+function findInMemoryTaskBySheetId(taskId) {
+  let match = null;
+  for (const session of threadSessions.values()) {
+    for (const task of session.tasks.values()) {
+      if (String(task.taskId ?? "") !== String(taskId ?? "")) continue;
+      if (task.picEmployeeCode) return task;
+      match ||= task;
+    }
+  }
+  return match;
 }
 
 async function sendSheetUpdateText(record, text) {
@@ -506,7 +524,8 @@ function createSheetUpdateDraft(record, sheetTask, { picEmployeeCode = null } = 
     target: sheetTaskTarget(record),
     recordId: record.id,
     picEmail: normalizeEmail(sheetTask.pic),
-    picEmployeeCode: picEmployeeCode || record.parsed.employeeCode || null,
+    picEmployeeCode,
+    creatorEmail: normalizeEmail(sheetTask.creator),
     messageId: null,
     fieldUpdatePromise: null,
     confirmPromise: null,
@@ -545,6 +564,7 @@ async function sendSheetUpdateCard(record, pending) {
       deadline: pending.fields.deadline,
       priority: pending.fields.priority,
       taskStatus: pending.fields.status,
+      creator: pending.fields.creator,
     },
     confirmation: { status: "sending", draftId: pending.updateId, error: "" },
   });
@@ -578,11 +598,18 @@ async function processSheetTaskUpdateById(record, taskId, intent = null) {
       return;
     }
     if (!isSheetRowUpdateAuthorized(record, task)) {
-      updateProcessing(record, { sheet: { status: "forbidden", error: "Chỉ PIC của task mới được cập nhật task đã ghi Sheet." } });
-      await sendSheetUpdateText(record, "Bạn không có quyền cập nhật task này. Chỉ PIC được ghi trong Sheet mới được đổi Priority, Deadline hoặc Status.");
+      updateProcessing(record, { sheet: { status: "forbidden", error: "Chỉ PIC hoặc người tạo task mới được cập nhật task đã ghi Sheet." } });
+      await sendSheetUpdateText(record, "Bạn không có quyền cập nhật task này. Chỉ PIC hoặc người tạo task mới được đổi Priority, Deadline hoặc Status.");
       return;
     }
-    const pending = applyNaturalSheetUpdate(record, createSheetUpdateDraft(record, task), intent);
+    const inMemoryTask = findInMemoryTaskBySheetId(task.id);
+    const picEmployeeCode = resolveSheetUpdatePicEmployeeCode({
+      requesterEmail: record.parsed.email,
+      picEmail: task.pic,
+      requesterEmployeeCode: record.parsed.employeeCode,
+      knownPicEmployeeCode: inMemoryTask?.picEmployeeCode,
+    });
+    const pending = applyNaturalSheetUpdate(record, createSheetUpdateDraft(record, task, { picEmployeeCode }), intent);
     if (isStatusOnlyUpdate(intent)) {
       sheetUpdateDrafts.delete(pending.updateId);
       await updateSheetStatusImmediately(record, pending);
@@ -608,6 +635,7 @@ async function updateSheetStatusImmediately(record, pending) {
       deadline: pending.fields.deadline,
       priority: pending.fields.priority,
       taskStatus: pending.fields.status,
+      creator: pending.fields.creator,
       updatedAt,
     },
     confirmation: { status: "updating", error: "" },
@@ -828,6 +856,7 @@ async function processTaskForTask(record, session, task, { skipSheet = false } =
       taskContent: draft.task,
       priority: draft.priority,
       taskStatus: draft.status,
+      creator: draft.creator,
       createdAt: draft.createdAt,
       updatedAt: draft.updatedAt,
       taskId: task.taskId || null,
@@ -892,7 +921,7 @@ async function processTask(record, { skipSheet = false } = {}) {
     const { session, task } = quotedTaskReference;
     if (task.written) {
       if (!isTaskMessageUpdateAuthorized(record, task)) {
-        updateProcessing(record, { confirmation: { status: "ignored", error: "Chỉ PIC của task đã ghi Sheet mới được cập nhật task này." } });
+        updateProcessing(record, { confirmation: { status: "ignored", error: "Chỉ PIC hoặc người tạo task mới được cập nhật task đã ghi Sheet." } });
         return;
       }
       await requireReferencedSheetTaskUpdate(record, task.taskId);

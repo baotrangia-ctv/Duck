@@ -94,7 +94,15 @@ function sheetRowToTask(row, rowNumber) {
     status: String(row[5] ?? "").trim() || "IN PROGRESS",
     createdAt: String(row[6] ?? "").trim(),
     updatedAt: String(row[7] ?? "").trim(),
+    creator: String(row[8] ?? "").trim(),
   };
+}
+
+function resolveSheetUpdatePicEmployeeCode({ requesterEmail, picEmail, requesterEmployeeCode, knownPicEmployeeCode }) {
+  const requester = String(requesterEmail ?? "").trim().toLowerCase();
+  const pic = String(picEmail ?? "").trim().toLowerCase();
+  if (requester && pic && requester === pic && requesterEmployeeCode) return requesterEmployeeCode;
+  return knownPicEmployeeCode || null;
 }
 
 function taskRowText(task) {
@@ -127,4 +135,5 @@ export {
   findMatchingSheetTasks,
   normalizeSearchText,
   sheetRowToTask,
+  resolveSheetUpdatePicEmployeeCode,
 };

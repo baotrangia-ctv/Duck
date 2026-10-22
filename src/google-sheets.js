@@ -30,7 +30,7 @@ function columnLetter(index) {
   return result;
 }
 
-function buildTaskRow({ id, task, taskContent, pic, deadline, priority, status, createdAt, updatedAt }) {
+function buildTaskRow({ id, task, taskContent, pic, deadline, priority, status, createdAt, updatedAt, creator }) {
   return [[
     Number.isInteger(id) ? id : "",
     task || taskContent || "",
@@ -40,6 +40,7 @@ function buildTaskRow({ id, task, taskContent, pic, deadline, priority, status, 
     status || "IN PROGRESS",
     createdAt || "",
     updatedAt || createdAt || "",
+    String(creator || "").trim().toLowerCase(),
   ]];
 }
 
@@ -47,7 +48,7 @@ class GoogleSheetsClient {
   constructor({
     spreadsheetId = "",
     sheetName = "Sheet1",
-    range = "A:H",
+    range = "A:I",
     oauthClientId = "",
     oauthClientSecret = "",
     oauthRedirectUri = "",
@@ -231,7 +232,7 @@ class GoogleSheetsClient {
     const normalizedId = String(taskId ?? "").trim();
     if (!/^\d+$/.test(normalizedId)) return null;
     const token = await this.getAccessToken();
-    const values = await this.readValues(`${this.sheetName}!A2:H`, token);
+    const values = await this.readValues(`${this.sheetName}!A2:I`, token);
     for (let index = 0; index < values.length; index += 1) {
       const task = sheetRowToTask(values[index], index + 2);
       if (task && String(task.id) === normalizedId) return task;
@@ -241,7 +242,7 @@ class GoogleSheetsClient {
 
   async findTasksByText(query, maxResults = 10) {
     const token = await this.getAccessToken();
-    const values = await this.readValues(`${this.sheetName}!A2:H`, token);
+    const values = await this.readValues(`${this.sheetName}!A2:I`, token);
     return findMatchingSheetTasks(values, query, maxResults);
   }
 
@@ -307,7 +308,12 @@ class GoogleSheetsClient {
 
     const token = await this.getAccessToken();
     const row = Number(rowNumber);
-    const range = `${this.sheetName}!A${row}:H${row}`;
+    const range = `${this.sheetName}!A${row}:I${row}`;
+    let creator = task.creator;
+    if (!String(creator || "").trim()) {
+      const existingRows = await this.readValues(range, token);
+      creator = existingRows[0]?.[8] ?? "";
+    }
     const endpoint = `${SHEETS_API}/${encodeURIComponent(this.spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
     const response = await fetch(endpoint, {
       method: "PUT",
@@ -317,7 +323,7 @@ class GoogleSheetsClient {
       },
       body: JSON.stringify({
         majorDimension: "ROWS",
-        values: buildTaskRow({ ...task, id: task.id ?? task.taskId }),
+        values: buildTaskRow({ ...task, creator, id: task.id ?? task.taskId }),
       }),
     });
     if (!response.ok) {

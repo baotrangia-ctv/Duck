@@ -88,7 +88,7 @@ Omit scope when the commit spans several areas or is repo-wide.
 
 Use `!` in the header and/or a BREAKING CHANGE footer when changing:
 
-- Google Sheet A–H column order/meaning, ID scheme, or expected header row.
+- Google Sheet A–I column order/meaning, ID scheme, or expected header row.
 - parseConfirmationButtonValue grammar in a way that invalidates cards already sent.
 - An environment variable name or runtime-changing default.
 - An HTTP endpoint or webhook alias meaning/removal.

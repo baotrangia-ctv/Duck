@@ -70,15 +70,18 @@ README-described DM-card plus thread-text fallback. See [gotchas](gotchas.md).
    selected shortId and calls processTaskForTask. clarification.promise deduplicates concurrent
    clicks; the pending choice is deleted after handling.
 
-## 5. Re-confirming a task already written
+## 5. Updating a task already written
 
-1. processTask finds the quoted/session task; only the PIC may revise a written task.
-2. processTaskForTask remembers that it was written, extracts the revision, and calls
-   reopenTaskForConfirmation. This clears written/card state but preserves rowNumber and taskId.
-3. A new confirmation card is sent. On Confirm, confirmTaskInternal calls updateTask when
-   rowNumber exists, rather than appendTask. A successful update keeps the same Sheet row and ID.
-4. Main statuses follow extraction complete, sheet writing → written, and confirmation writing
-   → confirmed. A failed update sets sheet/confirmation failed.
+1. A quoted task message is resolved from the in-memory session. The PIC or Creator may request
+   a change; processTask routes the request through requireReferencedSheetTaskUpdate.
+2. processSheetTaskUpdateById re-reads the row, checks the row's PIC/Creator emails, and builds
+   an update card or immediately applies a status-only change. An empty Creator cell allows only
+   the PIC.
+3. Confirm updates the existing row with updateTask, preserving the same Sheet row and ID.
+   Column I's Creator value is carried through the write; if it is absent from update fields,
+   GoogleSheetsClient reads the current cell before writing.
+4. Card-confirmed edits attempt to DM the PIC. If the PIC employee code is unavailable, the
+   Sheet update still succeeds and the notification error is recorded.
 
 ## 6. Phase 2: updating an existing Sheet task
 
@@ -87,7 +90,8 @@ README-described DM-card plus thread-text fallback. See [gotchas](gotchas.md).
 2. processSheetTaskUpdate requires a task ID or quote. The helper can produce a task-name query,
    but current server orchestration does not use findTasksByText to resolve that query.
 3. processSheetTaskUpdateById checks GOOGLE_SHEETS_WRITE_ENABLED, Sheets OAuth, row existence,
-   and PIC email authorization. It applies requested priority/deadline/status.
+   and PIC or Creator email authorization. A blank Creator cell means only the PIC is authorized.
+   It applies requested priority/deadline/status.
 4. Status-only requests take updateSheetStatusImmediately: sheet.status writing → updated and
    confirmation.status updating → updated; a text reply is sent. Failures set failed.
 5. Other requests send a card via sendSheetUpdateCard. Quick picks use updateSheetUpdateDraft;
@@ -96,6 +100,11 @@ README-described DM-card plus thread-text fallback. See [gotchas](gotchas.md).
    sent, and failed. Card/notification errors after the row update are recorded in
    confirmation.error without changing the successful Sheet update.
 6. PIC changes are explicitly unsupported and return a Phase 2 response.
+
+Creator is stored as a lowercase email in column I and is carried through whole-row updates.
+The live sheet's `Creator` header in I1 must be added manually. Card-confirmed Creator edits
+notify the PIC by employee code; if that code is unknown, the update is saved and the notification
+error is recorded instead of messaging the Creator.
 
 ## 7. Google OAuth connect/disconnect
 

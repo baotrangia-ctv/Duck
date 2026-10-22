@@ -93,7 +93,7 @@ For `src/`, `rules/`, and `test/`: an `AGENTS.md` with local conventions and the
 
 ## SEED NOTES (verify before using — these come from a first read of the code)
 
-**Project**: "Alpha Intel · SeaTalk inbox" — a dependency-free Node.js (ESM) HTTP server (`server.js`, ~1,430 lines) that receives SeaTalk Open Platform bot callbacks (`POST /callback`, aliases `/seatalk/callback`, `/webhook/seatalk`), extracts a task (PIC email, content, deadline `DD/MM/YYYY`, priority P0/P1/P2, status) from Vietnamese chat messages using an LLM (Chatflow or Compass) with a deterministic rules fallback, asks the creator to confirm via SeaTalk interactive card, then writes to a Google Sheet (columns A–H: ID, Task, PIC, Deadline, Priority, Status, CreatedAt, UpdatedAt) and DMs the PIC. A static dashboard (`public/`) shows events live over SSE. Port 3030 by default.
+**Project**: "Alpha Intel · SeaTalk inbox" — a dependency-free Node.js (ESM) HTTP server (`server.js`, ~1,430 lines) that receives SeaTalk Open Platform bot callbacks (`POST /callback`, aliases `/seatalk/callback`, `/webhook/seatalk`), extracts a task (PIC email, content, deadline `DD/MM/YYYY`, priority P0/P1/P2, status) from Vietnamese chat messages using an LLM (Chatflow or Compass) with a deterministic rules fallback, asks the creator to confirm via SeaTalk interactive card, then writes to a Google Sheet (columns A–I: ID, Task, PIC, Deadline, Priority, Status, CreatedAt, UpdatedAt, Creator) and DMs the PIC. A static dashboard (`public/`) shows events live over SSE. Port 3030 by default.
 
 **Layout**: `server.js` (orchestrator + all state + HTTP routing); `src/task-extractor.js` (~860 lines: prompt, date parsing, hints, providers); `src/seatalk.js` (API client + card builders); `src/google-sheets.js` (OAuth + Sheets REST via `fetch`); `src/thread-sessions.js` (pure in-memory session/task model and routing); `src/confirmation-auth.js` (who may click/update); `src/confirmation-routing.js` (button-value parser); `src/sheet-task-updates.js` (Vietnamese intent detection for updating existing Sheet rows, row→task mapping, fuzzy match); `rules/*.md` (PIC, deadline, priority policies injected into the LLM prompt); `public/{index.html,app.js,styles.css}` (dashboard); `test/*.test.js` + `test/eval-extract` + `test/fixtures/extraction-cases.json`; `bot-chat-flow.{svg,png}` (diagram of the chat flow — look at it and reference it from `docs/flows.md`).
 
@@ -106,11 +106,11 @@ For `src/`, `rules/`, and `test/`: an `AGENTS.md` with local conventions and the
 - `rules/*.md` are read once at module load; editing them requires a server restart, and tests assert on prompt contents.
 - Deadline/priority behaviour is defined in **three** places that must stay consistent: rule markdown, code (`normalizeDeadline`, `resolvePriority`, `finalizeFields`), and the few-shot table in `EXTRACTION_PROMPT` plus `extraction-cases.json`. Fixtures are anchored to reference date `2026-10-22` (a Thursday).
 - Code-computed deadline/priority override the model's output; the LLM is mostly used for `task` cleaning, PIC and `deadline_expression`.
-- Sheet row lookup assumes a header in row 1 (`A2:H`, `rowNumber = index + 2`); `nextTaskId` is `max+1` read-then-append, safe only because writes are serialised through `appendQueue` in one process (not multi-instance safe).
+- Sheet row lookup assumes a header in row 1 (`A2:I`, `rowNumber = index + 2`); `nextTaskId` is `max+1` read-then-append, safe only because writes are serialised through `appendQueue` in one process (not multi-instance safe). The live sheet's `Creator` header in I1 is added manually.
 - `void processTask(...)` is fire-and-forget; the webhook returns 200 immediately and failures surface only in `record.processing` and SSE.
 - A duplicate webhook (same `event_id`/`message_id`) is deduped, except it is re-processed when the previous attempt's `sheet.status === "failed"` and writes are enabled.
 - Thread messages of type `new_message_received_from_thread` are processed only if they quote a message or match an update intent (`shouldProcessMessage`).
-- Only the original creator may edit an unwritten draft; after the task is written only the PIC (compared by email) may update it (`isTaskMessageUpdateAuthorized`, `isSheetRowUpdateAuthorized`). PIC changes via chat are explicitly unsupported ("Phase 2").
+- Only the original creator may edit an unwritten draft; after the task is written the PIC or persisted Creator (compared by email) may update it (`isTaskMessageUpdateAuthorized`, `isSheetRowUpdateAuthorized`). An empty Creator cell leaves permission with the PIC only. PIC changes via chat are explicitly unsupported ("Phase 2").
 - `GOOGLE_SHEETS_WRITE_ENABLED` defaults to false; with it false, Confirm is acknowledged but nothing is written.
 - Dashboard API endpoints (`/api/messages`, `DELETE /api/messages`, `/api/test-message`, `/api/google/disconnect`) are unauthenticated with `Access-Control-Allow-Origin: *`; the server binds `0.0.0.0` by default. Flag as a deployment risk, do not change.
 - `.env`, `.oauth/google-token.json` are git-ignored and must never be committed or printed.
@@ -183,7 +183,7 @@ A change to `rules/*.md` that alters extraction behaviour is `feat` or `fix` (sc
 Omit the scope when a change spans several areas or is repo-wide.
 
 **Breaking changes** (mark with `!` after type/scope **and/or** a `BREAKING CHANGE: <what breaks and how to migrate>` footer). In this repo a change is breaking if it:
-- alters the Google Sheet column contract (A–H order, meaning, or the ID scheme) or the expected header row,
+- alters the Google Sheet column contract (A–I order, meaning, or the ID scheme) or the expected header row,
 - changes the button-value grammar parsed by `parseConfirmationButtonValue` so cards already sent to users stop working,
 - renames/removes an environment variable or changes its default in a way that alters runtime behaviour,
 - removes or changes the meaning of an HTTP endpoint or webhook alias,

@@ -41,6 +41,9 @@ Khi nhận `message_from_bot_subscriber` (hoặc event message tương đương)
 | F | Status — `IN PROGRESS`, `DONE` hoặc `NOT DO`; mặc định `IN PROGRESS` |
 | G | CreatedAt — thời điểm nhận/xác nhận task |
 | H | UpdatedAt — mặc định bằng `CreatedAt` |
+| I | Creator — email viết thường của người tạo task |
+
+Thêm thủ công header `Creator` vào ô I1 của Google Sheet đang dùng. Server không ghi header.
 
 Sau khi extract trong group chat, bot gửi phần nội dung PIC, Nội dung Task, Deadline, Priority vào thread gốc và gửi interactive card có nút **Confirm** vào chat riêng của người tạo task. SeaTalk group-chat API hiện không nhận `interactive_message`, nên đây là cách giữ được cả thread context và nút Confirm. Nếu không gửi được chat riêng, người dùng có thể reply `Confirm` trong thread. Chỉ khi Confirm thì task mới được ghi vào Google Sheet; sau khi ghi thành công, bot gửi thông tin task trực tiếp tới PIC thay vì phản hồi thành công vào group chat. ID được tính bằng `max(ID hiện có) + 1`; các lần ghi được serialize để tránh cấp trùng ID khi có nhiều event đồng thời.
 
@@ -67,7 +70,7 @@ CHATFLOW_API_URL=https://ai.insea.io/api/chatflows/26607/run?stream=true
 CHATFLOW_API_TOKEN=your_chatflow_token
 GOOGLE_SHEETS_SPREADSHEET_ID=your_spreadsheet_id_or_full_url
 GOOGLE_SHEETS_SHEET_NAME=Sheet1
-GOOGLE_SHEETS_RANGE=A:H
+GOOGLE_SHEETS_RANGE=A:I
 GOOGLE_OAUTH_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=your-web-client-secret
 GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3030/auth/google/callback
@@ -88,7 +91,7 @@ Khởi động server rồi mở dashboard và bấm **Kết nối Google**. Đ�
 
 Nếu Google trả lỗi `Google Sheets API has not been used ... or it is disabled`, mở **APIs & Services → Library**, tìm `Google Sheets API` trong đúng project của OAuth client và bấm **Enable**. Nếu OAuth consent screen đang ở chế độ Testing, thêm tài khoản đăng nhập vào danh sách **Test users**.
 
-Google Sheet phải có tám cột theo đúng thứ tự `ID`, `Task`, `PIC`, `Deadline`, `Priority`, `Status`, `CreatedAt`, `UpdatedAt` trong vùng `GOOGLE_SHEETS_RANGE`. `GOOGLE_SHEETS_SPREADSHEET_ID` có thể là ID thuần hoặc full URL của spreadsheet. Khi bật ghi Sheet, task chỉ được append sau khi Confirm; các draft đã ghi sẽ được update đúng dòng khi người dùng chỉnh sửa và Confirm lại. Server chống ghi trùng khi SeaTalk gửi lại cùng `event_id` hoặc `message_id`. Nút **Gửi tin nhắn thử** chỉ kiểm tra extraction và không gửi card/ghi dòng demo vào Sheet.
+Google Sheet dùng chín cột theo đúng thứ tự `ID`, `Task`, `PIC`, `Deadline`, `Priority`, `Status`, `CreatedAt`, `UpdatedAt`, `Creator` trong vùng `GOOGLE_SHEETS_RANGE`. `GOOGLE_SHEETS_SPREADSHEET_ID` có thể là ID thuần hoặc full URL của spreadsheet. Khi bật ghi Sheet, task chỉ được append sau khi Confirm; các draft đã ghi sẽ được update đúng dòng khi người dùng chỉnh sửa và Confirm lại. Với task đã ghi, PIC hoặc Creator có thể đổi Priority, Deadline và Status bằng tin nhắn quote, Task ID hoặc các nút trên card cập nhật. Nếu cột Creator trống thì chỉ PIC được chỉnh sửa. Server chống ghi trùng khi SeaTalk gửi lại cùng `event_id` hoặc `message_id`. Nút **Gửi tin nhắn thử** chỉ kiểm tra extraction và không gửi card/ghi dòng demo vào Sheet.
 
 Hiện tại chế độ ghi Sheet vẫn tắt mặc định bằng `GOOGLE_SHEETS_WRITE_ENABLED=false`. Dashboard vẫn hiển thị bảng **Thông tin sau khi extract payload** realtime. Khi muốn bật ghi, đặt biến này thành `true`, restart server và bấm **Kết nối Google**.
 

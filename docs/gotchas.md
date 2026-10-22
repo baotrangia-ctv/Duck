@@ -100,11 +100,14 @@ Ordered roughly by blast radius.
 ## Identity changes after a task is written
 
 - **What:** An unwritten draft is editable by its creator identity (email, employee_code, or
-  SeaTalk ID). Once written, message edits are authorized by PIC email; Sheet update clicks
-  also require the PIC email. Changing PIC through chat is unsupported.
-- **Why:** The allowed editor changes with task lifecycle and a missing email can deny a Sheet update.
+  SeaTalk ID). Once written, PIC and Creator emails may edit Priority, Deadline, and Status.
+  A blank Creator cell on a Sheet row leaves permission with the PIC only. Changing PIC through
+  chat is unsupported.
+- **Why:** The written-task Creator comes from column I and must survive whole-row updates; an
+  omitted Creator value must not erase it. Card-confirmed Creator edits must notify the PIC.
 - **Where:** src/confirmation-auth.js and server.js processTask/processSheetTaskUpdateById.
-- **Do:** Cover creator, PIC, missing identity, and mismatch cases in authorization tests.
+- **Do:** Cover creator, PIC, missing identity, legacy blank Creator, mismatch, row preservation,
+  and PIC notification routing in tests. Add the live sheet's `Creator` header manually in I1.
 
 ## Keep local credentials out of Git and output
 

@@ -61,7 +61,10 @@ function matchesExpectedIdentity(clickRecord, expected, { failOpen = false } = {
 
 function isTaskMessageUpdateAuthorized(messageRecord, task) {
   if (task?.written) {
-    return matchesExpectedIdentity(messageRecord, { email: task?.fields?.pic });
+    const clickerEmail = getClickerIdentity(messageRecord).email;
+    const picEmail = normalizeEmail(task?.fields?.pic);
+    const creatorEmail = normalizeEmail(task?.fields?.creator) || normalizeEmail(task?.creatorEmail);
+    return Boolean(clickerEmail && (clickerEmail === picEmail || clickerEmail === creatorEmail));
   }
   return matchesExpectedIdentity(messageRecord, {
     email: task?.creatorEmail,
@@ -70,15 +73,23 @@ function isTaskMessageUpdateAuthorized(messageRecord, task) {
   });
 }
 
+function isSheetRowUpdateAuthorized(messageRecord, task) {
+  const requesterEmail = getClickerIdentity(messageRecord).email;
+  const picEmail = normalizeEmail(task?.pic);
+  const creatorEmail = normalizeEmail(task?.creator);
+  return Boolean(requesterEmail && (requesterEmail === picEmail || requesterEmail === creatorEmail));
+}
+
 function isSheetUpdateClickAuthorized(clickRecord, pending) {
-  const expectedEmail = normalizeEmail(pending?.picEmail);
   const clicker = getClickerIdentity(clickRecord);
-  return Boolean(expectedEmail && clicker.email && clicker.email === expectedEmail);
+  const expectedEmails = [pending?.picEmail, pending?.creatorEmail].map(normalizeEmail).filter(Boolean);
+  return Boolean(clicker.email && expectedEmails.includes(clicker.email));
 }
 
 export {
   isConfirmationClickAuthorized,
   isClarificationClickAuthorized,
   isTaskMessageUpdateAuthorized,
+  isSheetRowUpdateAuthorized,
   isSheetUpdateClickAuthorized,
 };

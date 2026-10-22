@@ -41,6 +41,7 @@ function processingMarkup(result) {
       <div><span>ID</span><strong>${value(extraction.taskId)}</strong></div>
       <div><span>STATUS</span><strong>${value(extraction.taskStatus || "IN PROGRESS")}</strong></div>
       <div><span>PIC</span><strong>${value(extraction.pic)}</strong></div>
+      <div><span>CREATOR</span><strong>${value(extraction.creator)}</strong></div>
       <div><span>DEADLINE</span><strong>${value(extraction.deadline)}</strong></div>
       <div><span>PRIORITY</span><strong class="priority-value">${value(extraction.priority)}</strong></div>
       <div class="task-content-field"><span>NỘI DUNG CÔNG VIỆC</span><strong>${value(extraction.taskContent)}</strong></div>
@@ -68,6 +69,7 @@ function renderExtractedTasks() {
       <td>${escapeHtml(extraction.taskId || "—")}</td>
       <td>${escapeHtml(extraction.task || extraction.taskContent || "—")}<span class="task-table-source">${escapeHtml(source)}</span></td>
       <td>${escapeHtml(extraction.pic || "—")}</td>
+      <td>${escapeHtml(extraction.creator || "—")}</td>
       <td>${escapeHtml(extraction.deadline || "—")}</td>
       <td class="priority-cell">${escapeHtml(extraction.priority || "—")}</td>
       <td>${escapeHtml(extraction.taskStatus || "IN PROGRESS")}</td>

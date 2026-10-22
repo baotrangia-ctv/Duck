@@ -44,6 +44,11 @@ The direction is server.js → independent domain modules. google-sheets.js also
 row-conversion/search helpers from sheet-task-updates.js. Modules use Node built-ins and
 global fetch; there is no runtime package dependency graph.
 
+Google Sheet rows use columns A:I. Column I stores the task creator's lowercase email, which
+survives server restarts and participates in written-task edit authorization. Add the `Creator`
+header manually in I1 of the live sheet; the application does not write headers. The PIC or
+Creator can edit Priority, Deadline, and Status on a written task.
+
 ## Process-local state
 
 | State | Key / content | Creation and cleanup | Restart consequence |
@@ -53,7 +58,7 @@ global fetch; there is no runtime package dependency graph.
 | oauthStates | Random state → expiration timestamp | Created for OAuth start; expires after 10 minutes; expired entries are pruned at next start, callback consumes its state | Pending OAuth handshakes fail. Google token file remains on disk. |
 | threadSessions | Key is group:<groupId>:thread:<threadId-or-messageId>, single:<employeeCode>, or sender:<senderId>; value holds target, tasks keyed by shortId, and pendingClarifications keyed by clarifyId. | Created on first routed message; no runtime eviction | Drafts, short IDs, routing history, and pending clarification choices disappear. |
 | confirmationDrafts | task:confirm:<draftId> → threadKey, shortId, recordId, draftId | Added before sending a confirmation card; replaced/removed on resend, send failure, or successful write; no TTL | Old cards refer to an unknown draft and cannot be confirmed. |
-| sheetUpdateDrafts | updateId → Sheet row, fields, PIC identity, and promise guards | Created for a Sheet-update card; removed after successful confirmation; failures may leave it in memory; no TTL | Existing update cards cannot be confirmed. |
+| sheetUpdateDrafts | updateId → Sheet row, fields, PIC/Creator identity, and promise guards | Created for a Sheet-update card; removed after successful confirmation; failures may leave it in memory; no TTL | Existing update cards cannot be confirmed. |
 | sheetMessageReferences | SeaTalk message ID → numeric Sheet Task ID | Recorded for sent assignment/update messages; no TTL or size cap | Quoting an old remembered message no longer finds its Sheet task. |
 
 threadSessions and its task maps are not size-limited. The message cap does not cap those maps.

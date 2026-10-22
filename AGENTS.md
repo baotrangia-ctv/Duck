@@ -69,7 +69,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
 - Never read, print, or commit .env or .oauth/google-token.json. Use .env.example for names.
 - Keep rules/*.md, deterministic extraction code, EXTRACTION_PROMPT examples, fixtures, and
   tests aligned. Rule files are loaded when task-extractor.js is imported; restart the server.
-- Preserve the Google Sheet A–H contract, task button-value grammar, endpoint meanings, and
+- Preserve the Google Sheet A–I contract, task button-value grammar, endpoint meanings, and
   authorization behavior unless deliberately making a breaking change.
 - Treat dashboard routes as unauthenticated and CORS as wildcard; do not expose the default
   0.0.0.0 bind to an untrusted network without an explicit deployment review.
@@ -86,7 +86,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
   Allowed types: feat, fix, docs, test, refactor, perf, style, build, ci, chore, revert.
 - Allowed scopes: extractor, deadline, priority, pic, prompt, seatalk, card, sheets,
   sheet-update, thread, auth, routing, server, dashboard, config, eval, rules, deps.
-- Use ! and/or BREAKING CHANGE when changing A–H/ID/header contract, callback button grammar,
+- Use ! and/or BREAKING CHANGE when changing A–I/ID/header contract, callback button grammar,
   runtime-changing env names/defaults, endpoint meaning/aliases, or task authorization.
 - Never push, amend, rebase, hard-reset, bypass hooks, clean user files, or change git config.
 - Follow [docs/git-workflow.md](docs/git-workflow.md) for the complete policy and recipe.

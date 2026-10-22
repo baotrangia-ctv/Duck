@@ -23,7 +23,7 @@ Defaults below distinguish the runtime fallback from the value prefilled in .env
 | Compass | COMPASS_MODEL | compass-max | No | Model passed to Compass |
 | Google | GOOGLE_SHEETS_SPREADSHEET_ID | empty | For Sheets | Spreadsheet ID or full spreadsheet URL |
 | Google | GOOGLE_SHEETS_SHEET_NAME | Sheet1 | No | Tab name used for reads and writes |
-| Google | GOOGLE_SHEETS_RANGE | A:H | No | Eight-column write range |
+| Google | GOOGLE_SHEETS_RANGE | A:I | No | Nine-column write range |
 | Google | GOOGLE_OAUTH_CLIENT_ID | empty | For OAuth | Web OAuth client ID |
 | Google | GOOGLE_OAUTH_CLIENT_SECRET | empty | For OAuth | Web OAuth client secret |
 | Google | GOOGLE_OAUTH_REDIRECT_URI | http://localhost:3030/auth/google/callback; code uses current PORT when unset | For OAuth | Must match provider redirect configuration |
@@ -91,10 +91,16 @@ deployed SeaTalk app before relying on the README flow; see [gotchas](gotchas.md
 | F | Status | IN PROGRESS, DONE, or NOT DO |
 | G | CreatedAt | ISO timestamp |
 | H | UpdatedAt | ISO timestamp; defaults to CreatedAt |
+| I | Creator | Lowercase email of the task creator; may be empty when SeaTalk supplies no email |
 
-The client reads task rows from A2:H (header assumed on row 1), and IDs from A2:A. Appends
-and updates use valueInputOption=USER_ENTERED. appendQueue serializes reads/writes in one
+Add the `Creator` header manually in cell I1 of the live sheet. The application does not write
+or alter the header row. The client reads task rows from A2:I (header assumed on row 1), and IDs
+from A2:A. Appends and updates use valueInputOption=USER_ENTERED. appendQueue serializes reads/writes in one
 GoogleSheetsClient instance; it is not a distributed lock for multiple server instances.
+
+For written tasks, the PIC or the Creator may edit Priority, Deadline, and Status. The Sheet
+row's Creator value is authoritative for ID-based and card updates; an empty Creator cell leaves
+edit permission with the PIC only. A Creator's card-confirmation DM is routed to the PIC.
 
 OAuth requests spreadsheet, openid, email, and profile scopes. The token file defaults to
 .oauth/google-token.json, is written with mode 0600, and is deleted by disconnect. Keep it

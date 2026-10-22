@@ -490,7 +490,7 @@ test("payload hints choose the mentioned assignee from the actual group-chat sha
   });
 });
 
-test("task row follows the Google Sheet A-H contract", () => {
+test("task row follows the Google Sheet A-I contract", () => {
   assert.deepEqual(buildTaskRow({
     id: 7,
     task: "Cập nhật dashboard",
@@ -500,6 +500,7 @@ test("task row follows the Google Sheet A-H contract", () => {
     status: "IN PROGRESS",
     createdAt: "2026-09-19T08:00:00.000Z",
     updatedAt: "2026-09-19T08:00:00.000Z",
+    creator: "Creator@Example.com",
   }), [[
     7,
     "Cập nhật dashboard",
@@ -509,6 +510,7 @@ test("task row follows the Google Sheet A-H contract", () => {
     "IN PROGRESS",
     "2026-09-19T08:00:00.000Z",
     "2026-09-19T08:00:00.000Z",
+    "creator@example.com",
   ]]);
 });
 
@@ -521,6 +523,7 @@ test("Google Sheets client accepts a spreadsheet URL as the ID", () => {
     tokenPath: "test/.oauth-not-used.json",
   });
   assert.equal(client.spreadsheetId, "abc123_XYZ");
+  assert.equal(client.range, "A:I");
   assert.equal(client.isConfigured(), true);
 });
 
