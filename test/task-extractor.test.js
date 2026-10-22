@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
+import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, EXTRACTION_PROMPT, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
 import { isConfirmationClickAuthorized } from "../src/confirmation-auth.js";
 import {
@@ -32,6 +32,55 @@ test("parseTaskFields accepts markdown fences and Vietnamese field names", () =>
     priority: null,
     status: null,
   });
+});
+
+test("parseTaskFields resolves deadline_expression before the model deadline", () => {
+  const result = parseTaskFields(
+    '{"task":"Document hướng dẫn deploy web","deadline_expression":"6h chiều nay","deadline":"29/10/2026"}',
+    "2026-10-22",
+  );
+  assert.equal(result.deadline, "22/10/2026");
+  assert.equal(result.deadlineExpression, "6h chiều nay");
+});
+
+test("LLM prompt includes the deadline expression schema, calibrated examples, and calendar", async () => {
+  assert.match(EXTRACTION_PROMPT, /"deadline_expression"/);
+  assert.match(EXTRACTION_PROMPT, /"priority_reason"/);
+  assert.match(EXTRACTION_PROMPT, /@bot @userA 6h chiều nay document/);
+  assert.match(EXTRACTION_PROMPT, /26\/10\/2026/);
+  assert.match(EXTRACTION_PROMPT, /31\/10\/2026/);
+
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "{\"task\":\"Example\"}" } }] }),
+      text: async () => "{\"task\":\"Example\"}",
+    };
+  };
+
+  try {
+    for (const provider of ["compass", "chatflow"]) {
+      const extractor = createTaskExtractor({
+        provider,
+        compassApiKey: "mock-key",
+        chatflowUrl: "https://chatflow.invalid",
+        chatflowToken: "mock-token",
+        referenceDate: "2026-10-22",
+      });
+      await extractor.extract("Cập nhật tài liệu", { event_type: "message" });
+      const body = JSON.parse(requests.at(-1).options.body);
+      const prompt = provider === "compass" ? body.messages[0].content : body.query;
+      assert.match(prompt, /2026-10-22 \(Thứ Năm\)/);
+      assert.match(prompt, /2026-10-23 \(Thứ Sáu\)/);
+      assert.match(prompt, /2026-11-05 \(Thứ Năm\)/);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("extractLabeledFields handles rule-based fallback", () => {

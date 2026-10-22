@@ -8,6 +8,11 @@
 - Nếu tin nhắn nêu một khoảng ngày (ví dụ "từ ngày 20 đến 25/9", "20-25/9"), dùng ngày kết thúc của khoảng làm deadline.
 - Nếu không tìm thấy deadline rõ ràng, trước tiên dùng Priority đã extract để suy ra deadline theo `TASK_PRIORITY_POLICY.md`. Nếu Priority cũng không xác định được, dùng Priority P2 và deadline mặc định là 7 ngày lịch sau reference date. Không hỏi lại.
 
+## Biểu thức có giờ không cần prefix
+- Nhận diện giờ đứng trần trong câu giao việc, kể cả khi không có "deadline", "trước" hoặc "hạn": "6h chiều nay", "9h sáng mai", "lúc 6h tối mai", "đến 17h hôm nay".
+- Cũng nhận diện buổi đứng trần như "chiều nay", "sáng mai", cùng các mốc "cuối ngày", "EOD" và "COB". Chỉ dùng giờ/buổi để xác định ngày; trả ngày, không trả giờ.
+- "đêm nay" và "tối nay" luôn neo vào ngày reference hiện tại, kể cả khi message tới sau 00:00.
+
 ## Ngày tuyệt đối / một phần
 - Định dạng số có năm (18/9/2026, 18-9-2026, 18.9.2026...): giữ nguyên, chuẩn hoá về DD/MM/YYYY.
 - Định dạng số không có năm (18/9, 18-9): đây là mốc mơ hồ về năm, không phải cụm chỉ hướng thời gian. Nếu ngày đó đã qua trong năm hiện tại, dùng năm kế tiếp gần nhất còn ở tương lai; nếu chưa qua, dùng năm hiện tại.
