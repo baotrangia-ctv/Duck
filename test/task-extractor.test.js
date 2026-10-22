@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
+import { readFileSync } from "node:fs";
+import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, EXTRACTION_PROMPT, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
 import { isConfirmationClickAuthorized } from "../src/confirmation-auth.js";
 import {
@@ -34,6 +35,55 @@ test("parseTaskFields accepts markdown fences and Vietnamese field names", () =>
   });
 });
 
+test("parseTaskFields resolves deadline_expression before the model deadline", () => {
+  const result = parseTaskFields(
+    '{"task":"Document hướng dẫn deploy web","deadline_expression":"6h chiều nay","deadline":"29/10/2026"}',
+    "2026-10-22",
+  );
+  assert.equal(result.deadline, "22/10/2026");
+  assert.equal(result.deadlineExpression, "6h chiều nay");
+});
+
+test("LLM prompt includes the deadline expression schema, calibrated examples, and calendar", async () => {
+  assert.match(EXTRACTION_PROMPT, /"deadline_expression"/);
+  assert.match(EXTRACTION_PROMPT, /"priority_reason"/);
+  assert.match(EXTRACTION_PROMPT, /@bot @userA 6h chiều nay document/);
+  assert.match(EXTRACTION_PROMPT, /26\/10\/2026/);
+  assert.match(EXTRACTION_PROMPT, /31\/10\/2026/);
+
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "{\"task\":\"Example\"}" } }] }),
+      text: async () => "{\"task\":\"Example\"}",
+    };
+  };
+
+  try {
+    for (const provider of ["compass", "chatflow"]) {
+      const extractor = createTaskExtractor({
+        provider,
+        compassApiKey: "mock-key",
+        chatflowUrl: "https://chatflow.invalid",
+        chatflowToken: "mock-token",
+        referenceDate: "2026-10-22",
+      });
+      await extractor.extract("Cập nhật tài liệu", { event_type: "message" });
+      const body = JSON.parse(requests.at(-1).options.body);
+      const prompt = provider === "compass" ? body.messages[0].content : body.query;
+      assert.match(prompt, /2026-10-22 \(Thứ Năm\)/);
+      assert.match(prompt, /2026-10-23 \(Thứ Sáu\)/);
+      assert.match(prompt, /2026-11-05 \(Thứ Năm\)/);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("extractLabeledFields handles rule-based fallback", () => {
   const result = extractLabeledFields("PIC: an@example.com; deadline: 30/09; nội dung công việc: cập nhật dashboard", "2026-09-19");
   assert.deepEqual(result, {
@@ -46,12 +96,12 @@ test("extractLabeledFields handles rule-based fallback", () => {
 });
 
 test("rules provider keeps the message as task content without inventing fields", async () => {
-  const extractor = createTaskExtractor({ provider: "rules" });
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-09-19" });
   const result = await extractor.extract("Cần cập nhật dashboard trước 25/09/2026", { event_type: "message" });
   assert.deepEqual(result, {
     pic: null,
     deadline: "25/09/2026",
-    taskContent: "cập nhật dashboard",
+    taskContent: "Cập nhật dashboard",
     priority: "P2",
     status: "IN PROGRESS",
     source: "rules",
@@ -63,6 +113,202 @@ test("priority defaults to P2 when no deadline is available", async () => {
   const result = await extractor.extract("Cập nhật tài liệu hướng dẫn", { event_type: "message" });
   assert.equal(result.priority, "P2");
   assert.match(result.deadline, /^\d{2}\/\d{2}\/\d{4}$/);
+});
+
+test("rules provider cleans the original deadline extraction case", async () => {
+  const text = "@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé";
+  const payload = {
+    event: {
+      message: {
+        text: {
+          plain_text: text,
+          mentioned_list: [
+            { username: "bot", location: 0, length: 4 },
+            { username: "userA", email: "userA@example.com", location: 5, length: 6 },
+          ],
+        },
+      },
+    },
+  };
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+  const result = await extractor.extract(text, payload);
+  assert.deepEqual(result, {
+    pic: "userA@example.com",
+    deadline: "22/10/2026",
+    taskContent: "Document hướng dẫn deploy web",
+    priority: "P0",
+    status: "IN PROGRESS",
+    source: "rules",
+  });
+});
+
+test("LLM task content takes precedence over the payload hint", async () => {
+  const text = "@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé";
+  const payload = {
+    event: {
+      message: {
+        text: {
+          plain_text: text,
+          mentioned_list: [
+            { username: "bot", location: 0, length: 4 },
+            { username: "userA", email: "userA@example.com", location: 5, length: 6 },
+          ],
+        },
+      },
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({
+      task: "LLM cleaned task content",
+      pic: null,
+      deadline_expression: "6h chiều nay",
+      deadline: null,
+      priority: null,
+      status: null,
+    }) } }] }),
+  });
+
+  try {
+    const extractor = createTaskExtractor({
+      provider: "compass",
+      compassApiKey: "mock-key",
+      referenceDate: "2026-10-22",
+    });
+    const result = await extractor.extract(text, payload);
+    assert.equal(result.taskContent, "LLM cleaned task content");
+    assert.equal(result.deadline, "22/10/2026");
+    assert.equal(result.priority, "P0");
+    assert.equal(result.pic, "userA@example.com");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("mock LLM resolves the original case from deadline_expression when deadline is null", async () => {
+  const text = "@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé";
+  const payload = {
+    event: {
+      message: {
+        text: {
+          plain_text: text,
+          mentioned_list: [
+            { username: "bot", location: 0, length: 4 },
+            { username: "userA", email: "userA@example.com", location: 5, length: 6 },
+          ],
+        },
+      },
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({
+      task: "Document hướng dẫn deploy web",
+      pic: null,
+      deadline_expression: "6h chiều nay",
+      deadline: null,
+      priority: null,
+      priority_reason: "from_deadline",
+      status: null,
+    }) } }] }),
+  });
+
+  try {
+    const extractor = createTaskExtractor({
+      provider: "compass",
+      compassApiKey: "mock-key",
+      referenceDate: "2026-10-22",
+    });
+    const result = await extractor.extract(text, payload);
+    assert.deepEqual(result, {
+      pic: "userA@example.com",
+      deadline: "22/10/2026",
+      taskContent: "Document hướng dẫn deploy web",
+      priority: "P0",
+      status: "IN PROGRESS",
+      source: "compass",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rules provider derives priority from deadline unless the user labels it", async () => {
+  const cases = [
+    ["22/10/2026", "P0"],
+    ["23/10/2026", "P0"],
+    ["25/10/2026", "P1"],
+    ["27/10/2026", "P2"],
+    ["21/10/2026", "P0"],
+    ["22/10/2026", "P2", "priority: P2; "],
+  ];
+
+  for (const [deadline, expectedPriority, prefix = ""] of cases) {
+    const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+    const result = await extractor.extract(
+      `${prefix}deadline: ${deadline}; nội dung công việc: kiểm tra build`,
+      { event_type: "message" },
+    );
+    assert.equal(result.deadline, deadline);
+    assert.equal(result.priority, expectedPriority, `deadline ${deadline} with ${prefix || "no priority label"}`);
+  }
+});
+
+test("rules extraction matches every deadline and task in the few-shot examples", async () => {
+  const examples = [
+    ["@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé", "22/10/2026", "P0", "Document hướng dẫn deploy web"],
+    ["@userA fix bug login trước 9h sáng mai", "23/10/2026", "P0", "Fix bug login"],
+    ["@userA làm report doanh thu thứ 6 này", "23/10/2026", "P0", "Làm report doanh thu"],
+    ["@userA review PR thứ 2 tuần sau", "26/10/2026", "P2", "Review PR"],
+    ["@userA update dashboard trong tuần này", "23/10/2026", "P0", "Update dashboard"],
+    ["@userA gấp! sửa crash client", "22/10/2026", "P0", "Sửa crash client"],
+    ["@userA viết tài liệu API, không gấp", "29/10/2026", "P2", "Viết tài liệu API"],
+    ["@userA test build 25/10", "25/10/2026", "P1", "Test build"],
+    ["@userA deploy staging 3 ngày nữa", "25/10/2026", "P1", "Deploy staging"],
+    ["@userA báo cáo cuối tháng, priority P1", "31/10/2026", "P1", "Báo cáo"],
+  ];
+
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+  for (const [message, deadline, priority, taskContent] of examples) {
+    const result = await extractor.extract(message, { event_type: "message" });
+    assert.equal(result.deadline, deadline, message);
+    assert.equal(result.priority, priority, message);
+    assert.equal(result.taskContent, taskContent, message);
+  }
+});
+
+test("extraction eval fixtures include 40 cases with field expectations", () => {
+  const cases = JSON.parse(readFileSync(new URL("./fixtures/extraction-cases.json", import.meta.url), "utf8"));
+  assert.ok(cases.length >= 40);
+  for (const item of cases) {
+    assert.equal(typeof item.message, "string");
+    assert.ok(item.message.length > 0);
+    assert.match(item.deadline, /^\d{2}\/\d{2}\/\d{4}$/);
+    assert.ok(["P0", "P1", "P2"].includes(item.priority));
+    assert.equal(typeof item.task, "string");
+    assert.ok(item.task.length > 0);
+  }
+});
+
+test("rules provider matches every extraction eval fixture", async () => {
+  const cases = JSON.parse(readFileSync(new URL("./fixtures/extraction-cases.json", import.meta.url), "utf8"));
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+
+  for (const item of cases) {
+    const result = await extractor.extract(item.message, { event_type: "message" });
+    assert.equal(result.deadline, item.deadline, item.message);
+    assert.equal(result.priority, item.priority, item.message);
+    assert.equal(result.taskContent, item.task, item.message);
+  }
+});
+
+test("package exposes the extraction evaluation script", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.scripts["eval:extract"], "node test/eval-extract");
 });
 
 test("priority follows the policy for ISO deadlines", () => {
@@ -90,7 +336,7 @@ test("payload hints extract the assigned email and normalize a natural Vietnames
   assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
     pic: "chung@example.com",
     deadline: "19/09/2026",
-    taskContent: "lấy snack",
+    taskContent: "Lấy snack",
     status: null,
   });
 });
@@ -103,6 +349,45 @@ test("deadline normalization resolves the nearest future date from partial dates
   assert.equal(normalizeDeadline("trong tuần sau", "2026-09-19"), "25/09/2026");
   assert.equal(normalizeDeadline("tuần sau", "2026-09-19", "25/09/2026"), "24/09/2026");
   assert.equal(normalizeDeadline("trong tuần này", "2026-09-19", "18/09/2026"), "17/09/2026");
+});
+
+test("payload hints resolve natural deadline expressions without fixed prefixes", () => {
+  const cases = [
+    ["6h chiều nay document xong", "22/10/2026"],
+    ["6h chieu nay document xong", "22/10/2026"],
+    ["trước 9h sáng mai fix login", "23/10/2026"],
+    ["lúc 6h tối mai review", "23/10/2026"],
+    ["đến 17h hôm nay build", "22/10/2026"],
+    ["sáng nay chốt", "22/10/2026"],
+    ["hôm qua", "21/10/2026"],
+    ["hôm kia", "20/10/2026"],
+    ["cuối ngày", "22/10/2026"],
+    ["EOD", "22/10/2026"],
+    ["COB", "22/10/2026"],
+    ["cuối tuần", "25/10/2026"],
+    ["đầu tuần sau", "26/10/2026"],
+    ["giữa tuần sau", "28/10/2026"],
+    ["cuối tháng", "31/10/2026"],
+    ["cuoi thang", "31/10/2026"],
+    ["dau thang sau", "01/11/2026"],
+    ["3 ngày nữa", "25/10/2026"],
+    ["sau 2 tuần", "05/11/2026"],
+    ["sau 1 tháng", "22/11/2026"],
+    ["từ ngày 20 đến 25/10", "25/10/2026"],
+    ["20-25/10", "25/10/2026"],
+    ["thứ 6 này", "23/10/2026"],
+    ["t6 tuan sau", "30/10/2026"],
+    ["sau 3 ngay", "25/10/2026"],
+    ["ngày mai", "23/10/2026"],
+  ];
+
+  for (const [message, expected] of cases) {
+    assert.equal(
+      extractPayloadHints(message, {}, "2026-10-22").deadline,
+      expected,
+      message,
+    );
+  }
 });
 
 test("payload hints parse a natural deadline revision for Sheet updates", () => {
@@ -172,13 +457,16 @@ test("payload hints support the actual SeaTalk event.email and text.content shap
   assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
     pic: "giabao.tran@garena.vn",
     deadline: "21/09/2026",
-    taskContent: "optimize xong client performance của SAP",
+    taskContent: "Optimize xong client performance của SAP",
     status: null,
   });
 });
 
 test("payload hints choose the mentioned assignee from the actual group-chat shape", () => {
-  const text = "@Duck_Test Hãy log task cho @Chung Anh (Lemon) 🍋 trước thứ 2 tuần sau phải optimize xong client performance của Dig";
+  const botMention = "@Duck_Test";
+  const otherMention = "@Other";
+  const assigneeMention = "@Chung Anh (Lemon) 🍋";
+  const text = `${botMention} ${otherMention} Hãy log task cho ${assigneeMention} trước thứ 2 tuần sau phải optimize xong client performance của Dig`;
   const payload = {
     event: {
       message: {
@@ -186,8 +474,9 @@ test("payload hints choose the mentioned assignee from the actual group-chat sha
         text: {
           plain_text: text,
           mentioned_list: [
-            { username: "Duck_Test", email: "", location: 0, length: 10 },
-            { username: "Chung Anh (Lemon) 🍋", email: "chunganh.nguyenthi_ctv@garena.vn", location: 29, length: 21 },
+            { username: "Duck_Test", email: "", location: text.indexOf(botMention), length: botMention.length },
+            { username: "Other", email: "other@example.com", location: text.indexOf(otherMention), length: otherMention.length },
+            { username: "Chung Anh (Lemon) 🍋", email: "chunganh.nguyenthi_ctv@garena.vn", location: text.indexOf(assigneeMention), length: assigneeMention.length },
           ],
         },
       },
@@ -196,7 +485,7 @@ test("payload hints choose the mentioned assignee from the actual group-chat sha
   assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
     pic: "chunganh.nguyenthi_ctv@garena.vn",
     deadline: "21/09/2026",
-    taskContent: "Hãy log task cho phải optimize xong client performance của Dig",
+    taskContent: "Optimize xong client performance của Dig",
     status: null,
   });
 });

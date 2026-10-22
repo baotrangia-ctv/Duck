@@ -1,0 +1,69 @@
+import { readFileSync } from "node:fs";
+import { createTaskExtractor } from "../src/task-extractor.js";
+
+const args = process.argv.slice(2);
+const optionValue = (name) => {
+  const index = args.indexOf(name);
+  if (index >= 0) return args[index + 1] || "";
+  return args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1) || "";
+};
+
+const requestedProvider = optionValue("--provider") || process.env.TASK_EXTRACTOR || "auto";
+const referenceDate = optionValue("--reference-date") || "2026-10-22";
+const showDetails = args.includes("--details");
+const cases = JSON.parse(readFileSync(new URL("./fixtures/extraction-cases.json", import.meta.url), "utf8"));
+const useConfiguredProvider = requestedProvider !== "rules";
+const extractor = createTaskExtractor({
+  provider: requestedProvider,
+  ...(useConfiguredProvider ? {
+    chatflowUrl: process.env.CHATFLOW_API_URL || "",
+    chatflowToken: process.env.CHATFLOW_API_TOKEN || "",
+    compassBaseUrl: process.env.COMPASS_BASE_URL || undefined,
+    compassApiKey: process.env.COMPASS_API_KEY || "",
+    compassModel: process.env.COMPASS_MODEL || undefined,
+    holidayDates: process.env.HOLIDAY_DATES || "",
+  } : {}),
+  referenceDate,
+});
+
+const fields = [
+  ["deadline", "deadline"],
+  ["priority", "priority"],
+  ["task", "taskContent"],
+];
+const correct = Object.fromEntries(fields.map(([label]) => [label, 0]));
+const mismatches = [];
+let activeProvider = "unknown";
+
+for (const [index, item] of cases.entries()) {
+  const result = await extractor.extract(item.message, { event_type: "message" });
+  activeProvider = result.source || activeProvider;
+  const itemMismatches = [];
+
+  for (const [label, resultField] of fields) {
+    const expected = item[label];
+    const actual = result[resultField] ?? null;
+    if (actual === expected) {
+      correct[label] += 1;
+    } else {
+      itemMismatches.push({ field: label, expected, actual });
+    }
+  }
+
+  if (itemMismatches.length) mismatches.push({ index: index + 1, message: item.message, fields: itemMismatches });
+}
+
+console.log(`Extraction evaluation: ${cases.length} cases | provider: ${activeProvider} | reference date: ${referenceDate}`);
+for (const [label] of fields) {
+  const count = correct[label];
+  console.log(`${label}: ${count}/${cases.length} (${(count / cases.length * 100).toFixed(1)}%)`);
+}
+
+if (showDetails) {
+  for (const mismatch of mismatches) {
+    console.log(`#${mismatch.index} ${mismatch.message}`);
+    for (const field of mismatch.fields) {
+      console.log(`  ${field.field}: expected ${JSON.stringify(field.expected)}, got ${JSON.stringify(field.actual)}`);
+    }
+  }
+}
