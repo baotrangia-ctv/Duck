@@ -157,12 +157,32 @@ function nextDateWithDayOfMonth(reference, day, monthOffset = 0) {
   return null;
 }
 
+function addMonths(reference, months) {
+  const monthStart = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + months, 1));
+  const lastDay = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), Math.min(reference.getUTCDate(), lastDay)));
+}
+
+function hasUnicodeTerm(text, pattern) {
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${pattern})(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
 function normalizeDeadline(value, referenceDate = getReferenceDate(), holidayDates = "") {
   const text = asText(value);
   if (!text) return null;
 
   const iso = parseIsoDate(text);
   if (iso) return formatDateParts(iso);
+
+  const lower = text.normalize("NFC").toLocaleLowerCase("vi-VN");
+  const dateRange = lower.match(/(?:từ\s+)?(?:ngày\s+)?\d{1,2}(?:[/.]\d{1,2})?\s*(?:đến|tới|to|[-–])\s*(\d{1,2}[/.]\d{1,2}(?:[/.]\d{2,4})?)/i) ||
+    lower.match(/(?:từ\s+)?(?:ngày\s+)?\d{1,2}\s+(?:đến|tới|to)\s+(\d{1,2})\s+tháng\s+(\d{1,2})(?:\s+năm\s+(\d{2,4}))?/i);
+  if (dateRange) {
+    const endDate = dateRange[1]
+      ? dateRange[1]
+      : `${dateRange[2]}/${dateRange[3]}${dateRange[4] ? `/${dateRange[4]}` : ""}`;
+    return normalizeDeadline(endDate, referenceDate, holidayDates);
+  }
 
   const numeric = text.match(/^(\d{1,2})[/.\-](\d{1,2})(?:[/.\-](\d{2,4}))?$/);
   if (numeric) {
@@ -190,27 +210,55 @@ function normalizeDeadline(value, referenceDate = getReferenceDate(), holidayDat
 
   const reference = parseIsoDate(referenceDate);
   if (!reference) return null;
-  const lower = text.toLocaleLowerCase("vi-VN");
-  const hasExplicitWeekday = /\bthứ\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)\s+(?:tuần\s+(?:này|sau|tới|trước)|next\s+week)\b/.test(lower);
-  if (!hasExplicitWeekday && /\b(?:trong\s+)?(?:tuần\s+sau\s+nữa|hai\s+tuần\s+tới)\b/.test(lower)) {
-    const date = lastWorkingDayOfWeek(reference, 2, holidayDates);
+
+  if (hasUnicodeTerm(lower, "hôm\\s+kia|hom\\s+kia|ngày\\s+kia|ngay\\s+kia|day\\s+before\\s+yesterday")) {
+    return formatDateParts(addDays(reference, -2));
+  }
+  if (hasUnicodeTerm(lower, "hôm\\s+qua|hom\\s+qua|yesterday")) return formatDateParts(addDays(reference, -1));
+  if (hasUnicodeTerm(lower, "hôm\\s+nay|hom\\s+nay|today|nay")) return formatDateParts(reference);
+  if (hasUnicodeTerm(lower, "ngày\\s+mai|ngay\\s+mai|tomorrow|mai")) return formatDateParts(addDays(reference, 1));
+
+  const hasExplicitWeekday = /(?<![\p{L}\p{N}])(?:chủ\s+nhật|chu\s+nhat|thứ\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|thu\s+(?:[2-7]|hai|ba|tu|nam|sau|bay)|t[2-7]|sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?![\p{L}\p{N}])/iu.test(lower);
+  const amount = hasExplicitWeekday
+    ? null
+    : lower.match(/(?:sau\s+|(?:trong\s+)?)?(\d+)\s*(ngày|ngay|days?|tuần|tuan|weeks?|tháng|thang|months?)(?:\s+nữa)?/i);
+  if (amount) {
+    const count = Number(amount[1]);
+    const unit = amount[2].toLocaleLowerCase("vi-VN");
+    const date = /^(?:tuần|tuan|weeks?)$/.test(unit)
+      ? addDays(reference, count * 7)
+      : /^(?:tháng|thang|months?)$/.test(unit)
+        ? addMonths(reference, count)
+        : addDays(reference, count);
+    return formatDateParts(date);
+  }
+
+  const weekQualifier = hasExplicitWeekday
+    ? null
+    : lower.match(/(?:đầu|dau|giữa|giua|cuối|cuoi)\s+(?:tuần|tuan)(?:\s+(này|nay|sau|tới|trước))?|(?:trong\s+)?(?:tuần|tuan)\s+(sau\s+nữa|sau|tới|này|trước)|hai\s+(?:tuần|tuan)\s+tới/i);
+  if (weekQualifier) {
+    const match = weekQualifier[0];
+    const qualifier = weekQualifier[1] || weekQualifier[2] || "này";
+    const weekOffset = /sau\s+nữa|hai\s+tuần/i.test(match) ? 2 : /sau|tới/i.test(qualifier) ? 1 : /trước/i.test(qualifier) ? -1 : 0;
+    const monday = mondayOfWeek(reference, weekOffset);
+    if (/^(?:đầu|dau)/i.test(match)) return formatDateParts(monday);
+    if (/^(?:giữa|giua)/i.test(match)) return formatDateParts(addDays(monday, 2));
+    if (/^(?:cuối|cuoi)/i.test(match)) return formatDateParts(addDays(monday, 6));
+    const date = lastWorkingDayOfWeek(reference, weekOffset, holidayDates);
     return date ? formatDateParts(date) : null;
   }
-  if (!hasExplicitWeekday && /\b(?:trong\s+)?tuần\s+(?:sau|tới)\b/.test(lower)) {
-    const date = lastWorkingDayOfWeek(reference, 1, holidayDates);
-    return date ? formatDateParts(date) : null;
+
+  const monthPart = lower.match(/(?:đầu|dau|giữa|giua|cuối|cuoi)\s+(?:tháng|thang)(?:\s+(này|nay|sau|tới|trước))?/i);
+  if (monthPart) {
+    const monthOffset = /sau|tới/i.test(monthPart[1] || "") ? 1 : /trước/i.test(monthPart[1] || "") ? -1 : 0;
+    const monthStart = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + monthOffset, 1));
+    const lastDay = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+    const part = monthPart[0];
+    const day = /^(?:đầu|dau)/i.test(part) ? 1 : /^(?:giữa|giua)/i.test(part) ? 15 : lastDay;
+    return formatDateParts(new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day)));
   }
-  if (!hasExplicitWeekday && /\btrong\s+tuần\s+này\b/.test(lower)) {
-    const date = lastWorkingDayOfWeek(reference, 0, holidayDates);
-    return date ? formatDateParts(date) : null;
-  }
-  if (!hasExplicitWeekday && /\btrong\s+tuần\s+trước\b/.test(lower)) {
-    const date = lastWorkingDayOfWeek(reference, -1, holidayDates);
-    return date ? formatDateParts(date) : null;
-  }
-  if (/\b(hôm nay|hom nay|today|nay)\b/.test(lower)) return formatDateParts(reference);
-  if (/\b(ngày mai|ngay mai|tomorrow|mai)\b/.test(lower)) return formatDateParts(addDays(reference, 1));
-  if (/\b(ngày kia|ngay kia|day after tomorrow)\b/.test(lower)) return formatDateParts(addDays(reference, 2));
+
+  if (hasUnicodeTerm(lower, "cuối\\s+ngày|cuoi\\s+ngay|eod|cob")) return formatDateParts(reference);
 
   const dayOnly = lower.match(/^(?:ngày|ngay|day)\s+(\d{1,2})(?:\s+(tháng này|thang nay|this month|tháng sau|thang sau|next month))?$/);
   if (dayOnly) {
@@ -227,16 +275,16 @@ function normalizeDeadline(value, referenceDate = getReferenceDate(), holidayDat
 
   const weekdays = [
     { day: 0, names: ["chủ nhật", "chu nhat", "sunday"] },
-    { day: 1, names: ["thứ 2", "thứ hai", "thu 2", "thu hai", "monday"] },
-    { day: 2, names: ["thứ 3", "thứ ba", "thu 3", "thu ba", "tuesday"] },
-    { day: 3, names: ["thứ 4", "thứ tư", "thu 4", "thu tu", "wednesday"] },
-    { day: 4, names: ["thứ 5", "thứ năm", "thu 5", "thu nam", "thursday"] },
-    { day: 5, names: ["thứ 6", "thứ sáu", "thu 6", "thu sau", "friday"] },
-    { day: 6, names: ["thứ 7", "thứ bảy", "thu 7", "thu bay", "saturday"] },
+    { day: 1, names: ["thứ 2", "thứ hai", "thu 2", "thu hai", "monday", "t2"] },
+    { day: 2, names: ["thứ 3", "thứ ba", "thu 3", "thu ba", "tuesday", "t3"] },
+    { day: 3, names: ["thứ 4", "thứ tư", "thu 4", "thu tu", "wednesday", "t4"] },
+    { day: 4, names: ["thứ 5", "thứ năm", "thu 5", "thu nam", "thursday", "t5"] },
+    { day: 5, names: ["thứ 6", "thứ sáu", "thu 6", "thu sau", "friday", "t6"] },
+    { day: 6, names: ["thứ 7", "thứ bảy", "thu 7", "thu bay", "saturday", "t7"] },
   ];
-  const weekday = weekdays.find(({ names }) => names.some((name) => lower.includes(name)));
+  const weekday = weekdays.find(({ names }) => names.some((name) => hasUnicodeTerm(lower, name.replace(/ /g, "\\s+"))));
   if (weekday) {
-    const weekQualifier = lower.match(/(?:tuần\s+(sau\s+nữa|sau|tới|này|trước)|hai\s+tuần\s+tới|next\s+week)/);
+    const weekQualifier = lower.match(/(?:(?:tuần|tuan)\s+(sau\s+nữa|sau|tới|này|trước)|hai\s+(?:tuần|tuan)\s+tới|next\s+week|(?:^|\s)(này|nay|this week)\s*$)/i);
     if (weekQualifier) {
       const qualifier = weekQualifier[1] || weekQualifier[0];
       const weekOffset = /sau\s+nữa|hai\s+tuần|next\s+week/.test(qualifier) ? 2 : /sau|tới/.test(qualifier) ? 1 : /trước/.test(qualifier) ? -1 : 0;
@@ -372,21 +420,33 @@ function cleanHintText(value) {
   return asText(String(value || "").replace(/^[\s,;:|-]+|[\s,;:|-]+$/g, ""));
 }
 
-function extractDeadlineText(value) {
-  const deadlineExpression = "(?:\\d{1,2}(?::\\d{2})?\\s*(?:giờ|h)\\s*(?:sáng|trưa|chiều|tối)?\\s*(?:hôm nay|nay|today)|hôm nay|ngày mai|ngày\\s+\\d{1,2}|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)(?:\\s+(?:tuần\\s+(?:sau|tới)|next\\s+week))?|\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2})";
-  const source = String(value || "")
+function extractDeadlineText(value, referenceDate = getReferenceDate(), holidayDates = "") {
+  const source = String(value || "").normalize("NFC")
     .replace(/\b(?:task|công việc|cong viec)\s*(?:#\s*\d+|(?:id|mã|ma)\s*#?\s*\d+|\d+)\b/gi, " ")
     .replace(/#\s*\d+\b/g, " ");
-  const prefix = "(?:deadline|hạn(?: chót| hoàn thành)?|due date|trước|(?:hoàn thành|hoàn tất)\\s+(?:vào\\s+)?ngày|vào\\s+ngày)";
-  const revision = source.match(new RegExp(`(?:đổi|sửa|update|cập nhật|thay)\\s+${prefix}\\s*(?:(?:sang|thành|là|to)\\s*)?(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
-  if (revision) return cleanHintText(revision[1]);
-  const standalone = source.match(/\b(?:trong\s+)?(?:tuần\s+sau\s+nữa|hai\s+tuần\s+tới|tuần\s+(?:sau|tới|này|trước))\b/i);
-  if (standalone && /\b(?:thứ\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|thu\s+(?:[2-7]|hai|ba|tư|nam|sau|bay))\s*$/i.test(String(value || "").slice(0, standalone.index))) {
-    return cleanHintText(String(value || "").match(new RegExp(`(${deadlineExpression})`, "i"))?.[1]);
-  }
-  if (standalone) return cleanHintText(standalone[0]);
-  const match = source.match(new RegExp(`${prefix}\\s*(?:(?:là|sang|thành|vào|trước)\\s*)?[:=-]?\\s*(${deadlineExpression})(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"));
-  return cleanHintText(match?.[1]);
+  const relative = "(?:hôm\\s+(?:nay|mai|kia|qua)|hom\\s+(?:nay|mai|kia|qua)|ngày\\s+(?:mai|kia)|ngay\\s+(?:mai|kia)|today|tomorrow|yesterday|day\\s+after\\s+tomorrow|day\\s+before\\s+yesterday|nay|mai|kia|qua)";
+  const daypartNames = "sáng|sang|trưa|trua|chiều|chieu|tối|toi|đêm|dem";
+  const time = `(?:lúc\\s+)?\\d{1,2}(?::\\d{2})?\\s*(?:giờ|gio|h)\\s*(?:${daypartNames})?\\s*${relative}`;
+  const daypart = `(?:${daypartNames})\\s+${relative}`;
+  const date = "(?:(?:ngày|ngay)\\s+)?\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2}\\s+tháng\\s+\\d{1,2}(?:\\s+năm\\s+\\d{4})?|(?:ngày|ngay|day)\\s+\\d{1,2}";
+  const weekday = "(?:chủ\\s+nhật|chu\\s+nhat|sunday|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|thu\\s+(?:[2-7]|hai|ba|tu|nam|sau|bay)|t[2-7])(?:\\s+(?:(?:tuần|tuan)\\s+(?:sau\\s+nữa|sau|tới|này|trước)|hai\\s+(?:tuần|tuan)\\s+tới|này|nay|sau|tới|trước|next\\s+week|this\\s+week))?";
+  const periods = "(?:đầu|dau|giữa|giua|cuối|cuoi)\\s+(?:tuần|tuan|tháng|thang)(?:\\s+(?:này|nay|sau|tới|trước))?|(?:trong\\s+)?(?:tuần|tuan)\\s+(?:sau\\s+nữa|sau|tới|này|trước)|hai\\s+(?:tuần|tuan)\\s+tới|cuối\\s+ngày|cuoi\\s+ngay|eod|cob";
+  const amount = "(?:(?:sau|trong)\\s+)?\\d+\\s*(?:ngày|ngay|days?|tuần|tuan|weeks?|tháng|thang|months?)(?:\\s+nữa)?";
+  const range = "(?:từ\\s+)?(?:ngày\\s+)?\\d{1,2}(?:[/.]\\d{1,2})?\\s*(?:đến|tới|to|[-–])\\s*\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?";
+  const deadlineExpression = `(?:${range}|${time}|${daypart}|${weekday}|${periods}|${amount}|${date}|${relative})`;
+  const prefix = "(?:deadline|hạn(?:\\s+(?:chót|hoàn thành))?|due\\s+date|trước|đến|lúc|before|by|(?:hoàn thành|hoàn tất)\\s+(?:vào\\s+)?ngày|vào\\s+ngày)";
+  const options = "iu";
+  const leftBoundary = String.raw`(?<![\p{L}\p{N}])`;
+  const rightBoundary = String.raw`(?![\p{L}\p{N}])`;
+  const explicit = source.match(new RegExp(`${leftBoundary}(${prefix})\\s*(?:(?:sang|thành|là|to|vào)\\s*)?[:=-]?\\s*(${deadlineExpression})`, options));
+  const match = explicit || source.match(new RegExp(`${leftBoundary}(${deadlineExpression})${rightBoundary}`, options));
+  if (!match) return null;
+  const expression = cleanHintText(explicit ? match[2] : match[1]);
+  const matchedText = cleanHintText(match[0]);
+  return {
+    date: normalizeDeadline(expression, referenceDate, holidayDates),
+    matchedText,
+  };
 }
 
 function extractExplicitTaskContent(value) {
@@ -410,8 +470,8 @@ function extractPayloadHints(text, payload, referenceDate = getReferenceDate(), 
   const hasNonRoutingMention = nonRoutingMentions.length > 0;
   const selfReference = /\b(tôi|mình|em|tớ|tui|me|myself)\b/i.test(value);
 
-  const deadlineText = extractDeadlineText(value.normalize("NFC"));
-  const deadline = normalizeDeadline(deadlineText, referenceDate, holidayDates);
+  const deadlineDetails = extractDeadlineText(value, referenceDate, holidayDates);
+  const deadline = deadlineDetails?.date || null;
 
   let taskContent = value;
   if (mentions.length) {
@@ -467,7 +527,7 @@ function hasExplicitTaskRevision(text) {
 
 function hasExplicitDeadlineSignal(text) {
   const value = String(text || "").normalize("NFC");
-  return Boolean(extractDeadlineText(value)) ||
+  return Boolean(extractDeadlineText(value)?.date) ||
     /\b(?:deadline|hạn(?: chót| hoàn thành)?|due date)\b\s*(?:(?:là|sang|thành|vào|trước)\s*)?(?:\d{1,2}[/.\-]\d{1,2}(?:[/.\-]\d{2,4})?|thứ\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|hôm nay|ngày mai)\b/i.test(value);
 }
 

@@ -126,6 +126,45 @@ test("deadline normalization resolves the nearest future date from partial dates
   assert.equal(normalizeDeadline("trong tuần này", "2026-09-19", "18/09/2026"), "17/09/2026");
 });
 
+test("payload hints resolve natural deadline expressions without fixed prefixes", () => {
+  const cases = [
+    ["6h chiều nay document xong", "22/10/2026"],
+    ["6h chieu nay document xong", "22/10/2026"],
+    ["trước 9h sáng mai fix login", "23/10/2026"],
+    ["lúc 6h tối mai review", "23/10/2026"],
+    ["đến 17h hôm nay build", "22/10/2026"],
+    ["sáng nay chốt", "22/10/2026"],
+    ["hôm qua", "21/10/2026"],
+    ["hôm kia", "20/10/2026"],
+    ["cuối ngày", "22/10/2026"],
+    ["EOD", "22/10/2026"],
+    ["COB", "22/10/2026"],
+    ["cuối tuần", "25/10/2026"],
+    ["đầu tuần sau", "26/10/2026"],
+    ["giữa tuần sau", "28/10/2026"],
+    ["cuối tháng", "31/10/2026"],
+    ["cuoi thang", "31/10/2026"],
+    ["dau thang sau", "01/11/2026"],
+    ["3 ngày nữa", "25/10/2026"],
+    ["sau 2 tuần", "05/11/2026"],
+    ["sau 1 tháng", "22/11/2026"],
+    ["từ ngày 20 đến 25/10", "25/10/2026"],
+    ["20-25/10", "25/10/2026"],
+    ["thứ 6 này", "23/10/2026"],
+    ["t6 tuan sau", "30/10/2026"],
+    ["sau 3 ngay", "25/10/2026"],
+    ["ngày mai", "23/10/2026"],
+  ];
+
+  for (const [message, expected] of cases) {
+    assert.equal(
+      extractPayloadHints(message, {}, "2026-10-22").deadline,
+      expected,
+      message,
+    );
+  }
+});
+
 test("payload hints parse a natural deadline revision for Sheet updates", () => {
   assert.equal(
     extractPayloadHints("Đổi deadline sang thứ 2 tuần sau", {}, "2026-09-22").deadline,
