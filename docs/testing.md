@@ -16,6 +16,8 @@ compares fixture expectations for deadline, priority, and task.
 | File | Coverage |
 |---|---|
 | test/task-extractor.test.js | JSON parsing, prompt, deterministic and mocked LLM extraction, deadlines, priorities, revisions, card builders, SeaTalk calls and auth |
+| test/google-service-account.test.js | Generated-key JWT signature/claims, token cache and concurrent refresh, invalid key handling |
+| test/google-sheets.test.js | Service-account status, Sheet access cache, and 403/404 error mapping |
 | test/task-acknowledgement.test.js | PIC-only acknowledgement, Sheet re-read/write, UpdatedAt, idempotence, final statuses, and card update |
 | test/sheet-task-updates.test.js | Update-intent/status parsing, A:I row conversion and Creator preservation, Sheet client lookup, update cards, PIC/Creator authorization and PIC notification routing |
 | test/thread-sessions.test.js | Session/task routing, quoted messages, clarification choices, five-task limit, short IDs, reopening |
@@ -23,15 +25,15 @@ compares fixture expectations for deadline, priority, and task.
 | test/eval-extract | CLI evaluator for fixture exact-match rates |
 
 There is no direct test import of server.js. HTTP route handling, webhook signature validation,
-deduplication, SSE lifecycle, OAuth route/state handling, and orchestration across modules
-are not covered by a server-level test suite.
+deduplication, SSE lifecycle, and orchestration across modules are not covered by a server-level
+test suite.
 
 ## Fakes and fixture workflow
 
 - task-extractor.test.js replaces globalThis.fetch for Chatflow/Compass calls and restores it
   in finally. SeaTalkClient accepts a fetchImpl constructor option for outbound call tests.
-- Google Sheets tests replace readValues or call pure row helpers; tests do not require a live
-  Google account. Keep new tests offline.
+- Google service-account tests generate throwaway RSA keys and fake the token endpoint. Sheets
+  tests inject token providers or replace readValues; no live Google account is used.
 - A fixture has message, deadline, priority, and task fields. Use the evaluator's pinned
   reference date for relative dates, or pass --reference-date explicitly.
 - Include focused unit tests for edge cases in addition to a fixture when changing parser
@@ -48,6 +50,6 @@ are not covered by a server-level test suite.
 | PIC or mention interpretation | rules/PIC_POLICY.md, payload-hint tests, task-extractor.js |
 | Card callback values | confirmation-routing.js, seatalk.js, parser/card tests; preserve existing callback compatibility |
 | Authorization | confirmation-auth.js, tests for missing and conflicting identity; inspect server call sites |
-| Sheet columns, row IDs, or OAuth | google-sheets.js, integrations docs, row/OAuth tests; treat contract changes as breaking |
+| Sheet columns, row IDs, or service-account auth | google-sheets.js, google-service-account.js, integrations docs, and client tests; treat contract changes as breaking |
 | HTTP/SSE flow | server.js and public/app.js; current tests do not exercise server.js directly |
 | Environment names/defaults | .env.example, server.js reads, integrations docs; treat runtime-changing changes as breaking |

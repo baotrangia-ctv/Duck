@@ -30,7 +30,7 @@ No task extraction status is created for verification events.
    sendSingleChat. confirmation.status is sending then sent, or not_configured/failed.
 4. The interactive callback is parsed by parseConfirmationButtonValue and dispatched by
    handleWebhook to confirmTask. confirmTask checks the pending draft and confirmTaskInternal
-   checks identity, PIC/deadline/task presence, the write flag, configuration, and OAuth.
+   checks identity, PIC/deadline/task presence, the write flag, service-account configuration, and Sheet access.
 5. Missing fields give sheet.status=missing_required_fields and confirmation.status=needs_revision.
    A disabled write flag gives paused/blocked; missing configuration or authorization gives
    not_configured/auth_required and blocked. These branches do not write a row.
@@ -97,7 +97,8 @@ README-described DM-card plus thread-text fallback. See [gotchas](gotchas.md).
    a quoted SeaTalk assignment/update message can resolve through sheetMessageReferences.
 2. processSheetTaskUpdate requires a task ID or quote. The helper can produce a task-name query,
    but current server orchestration does not use findTasksByText to resolve that query.
-3. processSheetTaskUpdateById checks GOOGLE_SHEETS_WRITE_ENABLED, Sheets OAuth, row existence,
+3. processSheetTaskUpdateById checks GOOGLE_SHEETS_WRITE_ENABLED, service-account configuration,
+   row existence,
    and PIC or Creator email authorization. A blank Creator cell means only the PIC is authorized.
    It applies requested priority/deadline/status.
 4. Status-only requests take updateSheetStatusImmediately: sheet.status writing → updated and
@@ -114,16 +115,21 @@ The live sheet's `Creator` header in I1 must be added manually. Card-confirmed C
 notify the PIC by employee code; if that code is unknown, the update is saved and the notification
 error is recorded instead of messaging the Creator.
 
-## 7. Google OAuth connect/disconnect
+## 7. Google service-account Sheets access
 
-1. GET /auth/google calls startGoogleAuthorization. If configured, it creates a random state
-   expiring in ten minutes and redirects to Google's authorization URL with spreadsheet, openid,
-   email, and profile scopes.
-2. GET /auth/google/callback consumes the state and code. A provider error redirects as
-   cancelled; missing, invalid, or expired state/code returns HTTP 400. A valid code calls
-   authorizeWithCode, fetches account email, and saves tokens at GOOGLE_OAUTH_TOKEN_PATH.
-3. Access tokens are refreshed with the stored refresh token. POST /api/google/disconnect
-   clears the token object and deletes the local token file.
+1. GoogleServiceAccountTokenProvider loads the key at GOOGLE_SERVICE_ACCOUNT_KEY_PATH. Missing
+   or malformed keys leave the integration unconfigured without preventing server startup.
+2. When Sheets access is needed, the provider signs a short-lived RS256 JWT with the
+   spreadsheets scope and exchanges it at the configured token_uri (or Google's default).
+   The access token is cached in memory until 60 seconds before expiry, and concurrent refreshes
+   share one token request.
+3. GoogleSheetsClient uses the service account for append, update, and lookup operations. It
+   serializes row writes with appendQueue, preserving the A:I row contract and ID allocation.
+4. GET /api/google/status checks spreadsheet metadata to confirm access and caches the result for
+   60 seconds. A 403 prompts the operator to share the Sheet with the service-account email as
+   Editor; a 404 prompts them to check the spreadsheet ID and sharing.
+5. The old Sheets connect/disconnect routes return 404. Google OAuth settings are reserved for
+   the dashboard-login feature.
 
 ## 8. Dashboard and SSE
 

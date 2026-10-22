@@ -4,6 +4,8 @@
 - Preserve module boundaries: task extraction, SeaTalk messages, Sheets, thread state,
   authorization, button parsing, task acknowledgement, and Sheet-update intent each have
   separate modules.
+- Keep service-account key loading and token caching in `google-service-account.js`; the Sheets
+  client should consume a token provider and own only Sheets API behavior.
 - Keep API payload shapes and callback button values synchronized with server.js and tests.
 - For extraction changes, update deterministic code, rules, EXTRACTION_PROMPT examples,
   fixtures, and tests together. Preserve explicit-revision-only merge behavior.

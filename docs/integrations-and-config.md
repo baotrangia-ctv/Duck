@@ -24,18 +24,16 @@ Defaults below distinguish the runtime fallback from the value prefilled in .env
 | Google | GOOGLE_SHEETS_SPREADSHEET_ID | empty | For Sheets | Spreadsheet ID or full spreadsheet URL |
 | Google | GOOGLE_SHEETS_SHEET_NAME | Sheet1 | No | Tab name used for reads and writes |
 | Google | GOOGLE_SHEETS_RANGE | A:I | No | Nine-column write range |
-| Google | GOOGLE_OAUTH_CLIENT_ID | empty | For OAuth | Web OAuth client ID |
-| Google | GOOGLE_OAUTH_CLIENT_SECRET | empty | For OAuth | Web OAuth client secret |
-| Google | GOOGLE_OAUTH_REDIRECT_URI | http://localhost:3030/auth/google/callback; code uses current PORT when unset | For OAuth | Must match provider redirect configuration |
-| Google | GOOGLE_OAUTH_TOKEN_PATH | .oauth/google-token.json | No | Resolved relative to repo root; stores OAuth tokens |
+| Google | GOOGLE_SERVICE_ACCOUNT_KEY_PATH | .auth/google-service-account.json | For Sheets | Resolved relative to repo root; service-account JSON key |
+| Google | GOOGLE_OAUTH_CLIENT_ID | empty | For login | Google web OAuth client ID |
+| Google | GOOGLE_OAUTH_CLIENT_SECRET | empty | For login | Google web OAuth client secret |
+| Google | GOOGLE_OAUTH_REDIRECT_URI | http://localhost:3030/auth/google/callback; code uses current PORT when unset | For login | Must match provider redirect configuration |
 | Google | GOOGLE_SHEETS_WRITE_ENABLED | false | To write | Only the case-insensitive string true enables writes |
 
 ## HTTP endpoints
 
-The HTTP handler has no dashboard/API authentication. Callback signatures are checked only
-when SEATALK_SIGNING_SECRET is configured. JSON responses and SSE set
-Access-Control-Allow-Origin: *; OPTIONS allows GET, POST, DELETE, and OPTIONS with Content-Type
-and Signature headers.
+The dashboard/API currently have no authentication. Callback signatures are checked only when
+SEATALK_SIGNING_SECRET is configured. JSON and SSE responses currently allow wildcard CORS.
 
 | Method | Path | Purpose | Auth |
 |---|---|---|---|
@@ -49,10 +47,7 @@ and Signature headers.
 | DELETE | /api/messages | Clear in-memory event list and broadcast clear | None |
 | GET | /api/stream | Dashboard SSE snapshot and updates | None |
 | POST | /api/test-message | Create local sample and run extraction with skipSheet | None |
-| GET | /auth/google | Start Google OAuth | None |
-| GET | /auth/google/callback | Complete OAuth callback | OAuth state/code validation |
-| GET | /api/google/status | Google configuration/authorization status | None |
-| POST | /api/google/disconnect | Delete local OAuth token file | None |
+| GET | /api/google/status | Service-account and Sheet-access status | None |
 | OPTIONS | * | CORS preflight | None |
 
 The default bind is 0.0.0.0, and /api/messages exposes raw event payloads. Treat the
@@ -107,6 +102,10 @@ column C may acknowledge the card; the Creator cannot acknowledge unless they ar
 Acknowledgement re-reads the row and changes TODO to IN PROGRESS, refreshing UpdatedAt. Repeated
 clicks and rows already in IN PROGRESS, DONE, or NOT DO do not change the Sheet row.
 
-OAuth requests spreadsheet, openid, email, and profile scopes. The token file defaults to
-.oauth/google-token.json, is written with mode 0600, and is deleted by disconnect. Keep it
-private and out of Git. Writes are disabled unless GOOGLE_SHEETS_WRITE_ENABLED=true.
+GoogleSheetsClient obtains access tokens from the service-account JWT bearer grant, using only
+the spreadsheets scope. The key file defaults to `.auth/google-service-account.json`; keep it
+private and out of Git. The service-account `client_email` must be shared on the spreadsheet
+with Editor access. `/api/google/status` checks access with a lightweight spreadsheet metadata
+request and caches the result for 60 seconds. A 403 returns a share instruction; a 404 asks the
+operator to check the spreadsheet ID and sharing. Writes remain disabled unless
+GOOGLE_SHEETS_WRITE_ENABLED=true. The GOOGLE_OAUTH_* variables are reserved for dashboard login.

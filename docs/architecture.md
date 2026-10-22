@@ -23,8 +23,10 @@ flowchart TD
   WH --> STORE[messages, processing state]
   STORE --> SSE["GET /api/stream SSE"]
   SSE --> DASH[public/app.js dashboard]
-  WH --> OAUTH[Google OAuth routes]
-  OAUTH --> GS
+  GS --> SA[Google service-account token provider]
+  SA -->|JWT bearer grant| GT[Google token endpoint]
+  GT -->|access token| SA
+  SA -->|Bearer token| GS
 ```
 
 For the message routing and card destination details, see [flows](flows.md) and the
@@ -36,7 +38,8 @@ README/source mismatch in [gotchas](gotchas.md).
 |---|---|---|
 | server.js | All src modules listed below | Owns HTTP routing, wiring, mutable process state, and end-to-end flow |
 | src/task-extractor.js | node:fs, node:url | Reads policy files and implements extraction/date logic and optional LLM calls |
-| src/google-sheets.js | node:fs, node:path; sheet-task-updates.js | OAuth token persistence, Google Sheets API, row conversion and search |
+| src/google-sheets.js | sheet-task-updates.js | Google Sheets API calls, row conversion/search, access status and serialized writes |
+| src/google-service-account.js | node:crypto, node:fs | Loads a service-account key, signs JWT assertions and caches access tokens |
 | src/seatalk.js | No project modules | SeaTalk API client and outbound card/text builders |
 | src/thread-sessions.js | No project modules | Pure session/task/clarification model and message-based routing |
 | src/confirmation-auth.js | No project modules | Identity normalization and authorization predicates |
@@ -61,7 +64,6 @@ acknowledgement handler re-reads the row and changes TODO to IN PROGRESS with a 
 |---|---|---|---|
 | messages | Array keyed for duplicate search by record.id; id is event_id, parsed messageId, or a local synthetic ID. Records hold parsed data, raw payload, and processing state. | addMessage prepends newest first; capped at 100. DELETE /api/messages empties only this array. | Dashboard history and dedupe records are lost. |
 | clients | Set of open SSE response objects | Added by handleStream; removed on request close | Browser reconnects and receives a fresh snapshot. |
-| oauthStates | Random state → expiration timestamp | Created for OAuth start; expires after 10 minutes; expired entries are pruned at next start, callback consumes its state | Pending OAuth handshakes fail. Google token file remains on disk. |
 | threadSessions | Key is group:<groupId>:thread:<threadId-or-messageId>, single:<employeeCode>, or sender:<senderId>; value holds target, tasks keyed by shortId, and pendingClarifications keyed by clarifyId. | Created on first routed message; no runtime eviction | Drafts, short IDs, routing history, and pending clarification choices disappear. |
 | confirmationDrafts | task:confirm:<draftId> → threadKey, shortId, recordId, draftId | Added before sending a confirmation card; replaced/removed on resend, send failure, or successful write; no TTL | Old cards refer to an unknown draft and cannot be confirmed. |
 | sheetUpdateDrafts | updateId → Sheet row, fields, PIC/Creator identity, and promise guards | Created for a Sheet-update card; removed after successful confirmation; failures may leave it in memory; no TTL | Existing update cards cannot be confirmed. |
@@ -69,8 +71,8 @@ acknowledgement handler re-reads the row and changes TODO to IN PROGRESS with a 
 
 threadSessions and its task maps are not size-limited. The message cap does not cap those maps.
 confirmationDrafts, sheetUpdateDrafts, and sheetMessageReferences also have no general size
-limit; their entries are removed only on specific flow paths. OAuth credentials are separate:
-GoogleSheetsClient persists them to the configured token path.
+limit; their entries are removed only on specific flow paths. The service-account access token
+and the last Sheet access check are cached in memory by their respective Google modules.
 
 ## Concurrency guards
 

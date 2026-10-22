@@ -29,7 +29,7 @@ function processingMarkup(result) {
   const sheet = result.sheet || {};
   const confirmation = result.confirmation || {};
   const extractionLabels = { queued: "Đang xếp hàng", extracting: "Đang trích xuất", rules: "Rule fallback", complete: "Đã trích xuất", failed: "Lỗi" };
-  const sheetLabels = { queued: "Chờ ghi", awaiting_confirmation: "Chờ Confirm", writing: "Đang ghi", written: "Đã ghi vào Sheet", skipped: "Bỏ qua khi test", paused: "Tạm thời bỏ qua", missing_required_fields: "Thiếu field bắt buộc", not_configured: "Chưa cấu hình", auth_required: "Cần kết nối Google", failed: "Ghi lỗi", not_attempted: "Chưa ghi" };
+  const sheetLabels = { queued: "Chờ ghi", awaiting_confirmation: "Chờ Confirm", writing: "Đang ghi", written: "Đã ghi vào Sheet", skipped: "Bỏ qua khi test", paused: "Tạm thời bỏ qua", missing_required_fields: "Thiếu field bắt buộc", not_configured: "Chưa cấu hình", auth_required: "Cần cấp quyền Sheet", failed: "Ghi lỗi", not_attempted: "Chưa ghi" };
   const confirmationLabels = { queued: "Đang chuẩn bị", sending: "Đang gửi card", sent: "Đã gửi card Confirm", sent_text_fallback: "Đã gửi text trong thread", confirmed: "Đã Confirm", needs_revision: "Cần bổ sung field", blocked: "Chưa thể ghi", not_configured: "Chưa cấu hình outbound", failed: "Gửi card lỗi", not_attempted: "Không gửi khi test" };
   const extractionStatus = extraction.status || "queued";
   const sheetStatus = sheet.status || "queued";
@@ -129,37 +129,29 @@ function renderGoogleStatus() {
   const title = $("#googleStatusTitle");
   const text = $("#googleStatusText");
   const icon = $("#googleStatusIcon");
-  const connect = $("#googleConnectButton");
-  const disconnect = $("#googleDisconnectButton");
   const pill = $("#sheetsModePill");
-  if (!title || !text || !connect || !disconnect) return;
+  if (!title || !text) return;
 
   if (!status.configured) {
-    title.textContent = "Thiếu cấu hình OAuth";
-    text.textContent = "Cần thêm OAuth Client ID và Client Secret trong file .env.";
+    title.textContent = "Chưa cấu hình";
+    text.textContent = "Chưa cấu hình service account.";
     icon.textContent = "!";
-    connect.hidden = true;
-    disconnect.hidden = true;
     if (pill) pill.textContent = "GOOGLE SHEETS · CHƯA CẤU HÌNH";
     return;
   }
 
-  if (status.authorized) {
-    title.textContent = "Đã kết nối Google";
-    text.textContent = status.accountEmail ? `Đang dùng tài khoản ${status.accountEmail}` : "Tài khoản Google đã được kết nối.";
+  if (status.sheetAccess) {
+    title.textContent = "Đã truy cập được Google Sheet";
+    text.textContent = `Đã truy cập được Google Sheet bằng ${status.accountEmail}.`;
     icon.textContent = "✓";
-    connect.hidden = true;
-    disconnect.hidden = false;
-    if (pill) pill.textContent = "GOOGLE SHEETS · ĐÃ KẾT NỐI";
+    if (pill) pill.textContent = "GOOGLE SHEETS · ĐÃ CẤP QUYỀN";
     return;
   }
 
-  title.textContent = "Chưa kết nối Google";
-  text.textContent = "Đăng nhập bằng tài khoản có quyền Editor trên Google Sheet.";
-  icon.textContent = "↗";
-  connect.hidden = false;
-  disconnect.hidden = true;
-  if (pill) pill.textContent = "GOOGLE SHEETS · CẦN ĐĂNG NHẬP";
+  title.textContent = "Chưa truy cập được Google Sheet";
+  text.textContent = `Chưa truy cập được Google Sheet. Hãy share Sheet cho ${status.accountEmail} với quyền Editor.`;
+  icon.textContent = "!";
+  if (pill) pill.textContent = "GOOGLE SHEETS · CẦN CẤP QUYỀN";
 }
 
 async function loadGoogleStatus() {
@@ -221,18 +213,6 @@ $("#copyButton").addEventListener("click", async () => {
   const button = $("#copyButton");
   button.textContent = "✓";
   setTimeout(() => { button.textContent = "⧉"; }, 1400);
-});
-
-$("#googleDisconnectButton").addEventListener("click", async () => {
-  if (!confirm("Ngắt kết nối tài khoản Google khỏi website?")) return;
-  const button = $("#googleDisconnectButton");
-  button.disabled = true;
-  try {
-    await fetch("/api/google/disconnect", { method: "POST" });
-    await loadGoogleStatus();
-  } finally {
-    button.disabled = false;
-  }
 });
 
 loadMessages().catch(() => setConnection("offline", "Không kết nối được"));

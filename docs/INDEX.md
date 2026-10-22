@@ -4,7 +4,7 @@
 
 1. Read [the root agent guide](../AGENTS.md) for commands, conventions, and task lookup.
 2. Read [architecture](architecture.md) for module boundaries, process state, and concurrency.
-3. Read [flows](flows.md) for callback, confirmation, update, OAuth, and dashboard behavior.
+3. Read [flows](flows.md) for callback, confirmation, update, service-account, and dashboard behavior.
 4. Read [extraction](extraction.md) before changing PIC, deadline, priority, prompt, or fixtures.
 5. Read [integrations and config](integrations-and-config.md) before touching APIs or credentials.
 6. Use [testing](testing.md), [gotchas](gotchas.md), and [git workflow](git-workflow.md) while changing code.
@@ -36,7 +36,8 @@
 | [../server.js](../server.js) | HTTP server, routes, in-memory orchestration | handleWebhook, processTask, confirmTask, createServer handler | Changing routes or end-to-end behavior |
 | [../src/task-extractor.js](../src/task-extractor.js) | Rules, hints, LLM requests, date and field resolution | createTaskExtractor, normalizeDeadline, extractPayloadHints, parseTaskFields | Changing extraction |
 | [../src/seatalk.js](../src/seatalk.js) | SeaTalk client and outbound text/card shapes | SeaTalkClient, buildConfirmationMessage, buildTaskClarificationMessage | Changing SeaTalk messages |
-| [../src/google-sheets.js](../src/google-sheets.js) | OAuth token lifecycle and Sheets REST calls | GoogleSheetsClient, buildTaskRow | Changing Sheets or OAuth |
+| [../src/google-sheets.js](../src/google-sheets.js) | Google Sheets REST calls and row conversion/search | GoogleSheetsClient, buildTaskRow | Changing Sheets |
+| [../src/google-service-account.js](../src/google-service-account.js) | Service-account key loading and cached signed-token requests | GoogleServiceAccountTokenProvider | Changing Sheets credentials |
 | [../src/thread-sessions.js](../src/thread-sessions.js) | Thread tasks and clarification routing | createThreadSession, resolveTaskRoute, reopenTaskForConfirmation | Changing thread task behavior |
 | [../src/confirmation-auth.js](../src/confirmation-auth.js) | Creator, PIC, and clicker authorization | isConfirmationClickAuthorized, isTaskMessageUpdateAuthorized | Changing permissions |
 | [../src/confirmation-routing.js](../src/confirmation-routing.js) | SeaTalk callback value parser | parseConfirmationButtonValue | Changing interactive buttons |

@@ -29,7 +29,8 @@ sending a confirmation card or writing a Sheet row. The default server bind is 0
 | server.js (~1,430 lines) | HTTP routes, orchestration, in-memory state |
 | src/task-extractor.js (~864 lines) | Prompt, date rules, hints, provider calls |
 | src/seatalk.js | SeaTalk API client and message/card builders |
-| src/google-sheets.js | Google OAuth, token file, Sheets reads/writes |
+| src/google-sheets.js | Google Sheets REST API, service-account auth, row reads/writes |
+| src/google-service-account.js | Service-account key loading, signed JWTs, cached access tokens |
 | src/thread-sessions.js | In-memory thread/task model and routing |
 | src/confirmation-auth.js | Identity checks for confirmations and updates |
 | src/confirmation-routing.js | Callback button-value parser |
@@ -49,7 +50,7 @@ sending a confirmation card or writing a Sheet row. The default server bind is 0
 5. resolveTaskRoute and detectTaskIntent choose a new task, draft revision, clarification, or Sheet update.
 6. createTaskExtractor combines local rules, payload hints, and an optional Chatflow or Compass call.
 7. The task is kept in threadSessions and shown in a SeaTalk interactive confirmation card.
-8. A valid Confirm click checks identity, required fields, Sheet configuration, and OAuth.
+8. A valid Confirm click checks identity, required fields, Sheet configuration, and service-account access.
 9. GoogleSheetsClient appends a TODO row; the PIC receives an interactive DM and can acknowledge it
    to set IN PROGRESS.
 10. Dashboard snapshots and processing changes are broadcast over /api/stream SSE.
@@ -68,7 +69,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
 ## Always / Never
 
 - Keep user-facing bot copy in Vietnamese. Write agent documentation in English.
-- Never read, print, or commit .env or .oauth/google-token.json. Use .env.example for names.
+- Never read, print, or commit .env, .auth/, .oauth/, or any service-account key. Use .env.example for names.
 - Keep rules/*.md, deterministic extraction code, EXTRACTION_PROMPT examples, fixtures, and
   tests aligned. Rule files are loaded when task-extractor.js is imported; restart the server.
 - Preserve the Google Sheet A–I contract, task button-value grammar, endpoint meanings, and
@@ -101,7 +102,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
 | Change PIC detection | rules/PIC_POLICY.md and extractPayloadHints in src/task-extractor.js |
 | Change draft/thread routing | resolveTaskRoute in src/thread-sessions.js; processTask in server.js |
 | Change confirmation permissions or buttons | src/confirmation-auth.js, src/confirmation-routing.js, src/seatalk.js |
-| Change Sheet writes or OAuth | src/google-sheets.js and server.js; see docs/integrations-and-config.md |
+| Change Sheet writes or service-account auth | src/google-sheets.js, src/google-service-account.js and server.js; see docs/integrations-and-config.md |
 | Change dashboard or SSE | public/app.js and server.js handleStream/broadcast |
 | Add extraction coverage | test/fixtures/extraction-cases.json, test/task-extractor.test.js, docs/testing.md |
 
@@ -109,7 +110,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
 
 - [docs/INDEX.md](docs/INDEX.md) — reading order, glossary, module index.
 - [docs/architecture.md](docs/architecture.md) — modules, state, and concurrency.
-- [docs/flows.md](docs/flows.md) — callback, task, update, OAuth, and dashboard flows.
+- [docs/flows.md](docs/flows.md) — callback, task, update, service-account, and dashboard flows.
 - [docs/extraction.md](docs/extraction.md) — provider and field precedence details.
 - [docs/integrations-and-config.md](docs/integrations-and-config.md) — env vars, routes, SeaTalk, Sheets.
 - [docs/testing.md](docs/testing.md) — suites, fakes, evaluator, and change checklist.

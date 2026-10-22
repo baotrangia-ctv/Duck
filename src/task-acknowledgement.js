@@ -89,13 +89,13 @@ async function processTaskAcknowledgement(taskId, clickRecord, {
     return { handled: true, blocked: true };
   }
   if (!googleSheets?.isConfigured?.()) {
-    updateProcessing(record, { sheet: { status: "not_configured", error: "Google Sheets OAuth chưa được cấu hình." }, confirmation: { status: "blocked" } });
-    await sendNotice(clickRecord, seatalk, "Chưa thể xác nhận nhận task vì Google Sheets chưa được cấu hình.");
+    updateProcessing(record, { sheet: { status: "not_configured", error: "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet." }, confirmation: { status: "blocked" } });
+    await sendNotice(clickRecord, seatalk, "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     return { handled: true, blocked: true };
   }
   if (!googleSheets?.isAuthorized?.()) {
-    updateProcessing(record, { sheet: { status: "auth_required", error: "Google Sheets chưa được kết nối." }, confirmation: { status: "blocked" } });
-    await sendNotice(clickRecord, seatalk, "Chưa thể xác nhận nhận task vì Google Sheets chưa được kết nối.");
+    updateProcessing(record, { sheet: { status: "auth_required", error: "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet." }, confirmation: { status: "blocked" } });
+    await sendNotice(clickRecord, seatalk, "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     return { handled: true, blocked: true };
   }
 

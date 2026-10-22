@@ -32,8 +32,8 @@ Ordered roughly by blast radius.
 - **Why:** Old cards may point to missing drafts; quoted message IDs may no longer resolve.
   DELETE /api/messages clears only the visible message array, not sessions or drafts.
 - **Where:** server.js state declarations and addMessage; src/thread-sessions.js.
-- **Do:** Do not describe this as durable storage. OAuth tokens are separately persisted in
-  the token file, so a server restart does not itself disconnect Google.
+- **Do:** Do not describe this as durable storage. The service-account key is stored outside
+  Git, while access tokens are cached only in memory and fetched again after restart.
 
 ## Confirmation click authorization fails open without identity
 
@@ -119,13 +119,15 @@ Ordered roughly by blast radius.
 - **Do:** Cover creator, PIC, missing identity, legacy blank Creator, mismatch, row preservation,
   and PIC notification routing in tests. Add the live sheet's `Creator` header manually in I1.
 
-## Keep local credentials out of Git and output
+## Service account needs explicit Sheet sharing
 
-- **What:** .gitignore excludes .env and .oauth/. GoogleSheetsClient stores tokens under
-  .oauth/google-token.json by default.
-- **Why:** These files contain secrets or access tokens.
-- **Where:** .gitignore and src/google-sheets.js token methods.
-- **Do:** Read .env.example for variable names; never print, stage, or commit the actual files.
+- **What:** The service-account key defaults to `.auth/google-service-account.json`; Google
+  Sheets does not grant that account access to a spreadsheet automatically.
+- **Why:** A valid service-account token can still receive HTTP 403 until the Sheet is shared.
+- **Where:** src/google-service-account.js, src/google-sheets.js, and
+  `GET /api/google/status`.
+- **Do:** Share the Sheet with the key's `client_email` as Editor. Keep `.auth/`, `.env`, and
+  service-account keys out of Git and output; use `.env.example` for variable names.
 
 ## README contains a checkout-specific path
 

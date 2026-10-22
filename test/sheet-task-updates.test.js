@@ -81,12 +81,12 @@ test("Sheet task row parsing and content matching return row numbers", () => {
 test("Google Sheets client finds a task by ID and by content", async () => {
   const client = new GoogleSheetsClient({
     spreadsheetId: "sheet-id",
-    oauthClientId: "client-id",
-    oauthClientSecret: "client-secret",
-    oauthRedirectUri: "http://localhost:3030/auth/google/callback",
-    tokenPath: "test/.oauth-not-used.json",
+    tokenProvider: {
+      isConfigured: () => true,
+      getAccountEmail: () => "sheets@example.com",
+      getAccessToken: async () => "access-token",
+    },
   });
-  client.tokens = { access_token: "access-token", expiresAt: Date.now() + 120_000 };
   const readRanges = [];
   client.readValues = async (range) => {
     readRanges.push(range);
@@ -195,12 +195,12 @@ test("Creator edits route update DMs to the PIC employee code", () => {
 test("Sheet update preserves the existing Creator when omitted from update fields", async () => {
   const client = new GoogleSheetsClient({
     spreadsheetId: "sheet-id",
-    oauthClientId: "client-id",
-    oauthClientSecret: "client-secret",
-    oauthRedirectUri: "http://localhost:3030/auth/google/callback",
-    tokenPath: "test/.oauth-not-used.json",
+    tokenProvider: {
+      isConfigured: () => true,
+      getAccountEmail: () => "sheets@example.com",
+      getAccessToken: async () => "access-token",
+    },
   });
-  client.tokens = { access_token: "access-token", expiresAt: Date.now() + 120_000 };
   client.readValues = async (range) => {
     assert.equal(range, "Sheet1!A2:I2");
     return [[5, "Task", "pic@example.com", "25/09/2026", "P2", "IN PROGRESS", "created", "updated", "creator@example.com"]];
@@ -236,12 +236,12 @@ test("Sheet update preserves the existing Creator when omitted from update field
 test("conditional Sheet status update re-reads before writing and preserves the whole row", async () => {
   const client = new GoogleSheetsClient({
     spreadsheetId: "sheet-id",
-    oauthClientId: "client-id",
-    oauthClientSecret: "client-secret",
-    oauthRedirectUri: "http://localhost:3030/auth/google/callback",
-    tokenPath: "test/.oauth-not-used.json",
+    tokenProvider: {
+      isConfigured: () => true,
+      getAccountEmail: () => "sheets@example.com",
+      getAccessToken: async () => "access-token",
+    },
   });
-  client.tokens = { access_token: "access-token", expiresAt: Date.now() + 120_000 };
   let currentStatus = "TODO";
   client.readValues = async (range) => {
     assert.equal(range, "Sheet1!A7:I7");

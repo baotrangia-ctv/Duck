@@ -63,7 +63,7 @@ Server đọc các file này khi khởi động và ghép chúng vào EXTRACTION
 
 Mặc định `TASK_EXTRACTOR=auto` sẽ ưu tiên Chatflow đang có của project, sau đó dùng Compass LLM giống project `Claude`. Nếu chưa cấu hình AI, parser vẫn xử lý được tin nhắn có nhãn rõ ràng như `PIC: an@example.com; deadline: 30/09; nội dung công việc: cập nhật dashboard`.
 
-Đặt các biến Google Sheets và OAuth trong `.env`:
+Đặt các biến Google Sheets và service account trong `.env`:
 
 ```env
 TASK_EXTRACTOR=auto
@@ -73,10 +73,7 @@ CHATFLOW_API_TOKEN=your_chatflow_token
 GOOGLE_SHEETS_SPREADSHEET_ID=your_spreadsheet_id_or_full_url
 GOOGLE_SHEETS_SHEET_NAME=Sheet1
 GOOGLE_SHEETS_RANGE=A:I
-GOOGLE_OAUTH_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
-GOOGLE_OAUTH_CLIENT_SECRET=your-web-client-secret
-GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3030/auth/google/callback
-GOOGLE_OAUTH_TOKEN_PATH=.oauth/google-token.json
+GOOGLE_SERVICE_ACCOUNT_KEY_PATH=.auth/google-service-account.json
 GOOGLE_SHEETS_WRITE_ENABLED=true
 
 # SeaTalk outbound messaging for confirmation cards/thread replies.
@@ -87,15 +84,15 @@ SEATALK_APP_SECRET=your_seatalk_app_secret
 SEATALK_API_BASE_URL=https://openapi.seatalk.io
 ```
 
-Trong Google Cloud, bật **Google Sheets API**, cấu hình **OAuth consent screen**, rồi tạo **OAuth Client ID → Web application**. Thêm chính xác `http://localhost:3030/auth/google/callback` vào **Authorized redirect URIs**. Nếu dùng domain public, thay URI này bằng callback HTTPS của domain đó.
+Trong Google Cloud, bật **Google Sheets API**, tạo service account rồi tải JSON key vào `.auth/google-service-account.json` (hoặc đường dẫn đặt trong `GOOGLE_SERVICE_ACCOUNT_KEY_PATH`). Share Google Sheet với email `client_email` trong key và cấp quyền **Editor**. Không đưa key vào Git.
 
-Khởi động server rồi mở dashboard và bấm **Kết nối Google**. Đăng nhập bằng chính tài khoản Google có quyền **Editor** trên Sheet. Server chỉ lưu OAuth token trong `.oauth/google-token.json`; file này đã được ignore khỏi Git và không lưu mật khẩu Google. Sau khi OAuth thành công, người dùng có thể bấm **Confirm** trên card để ghi các task đang chờ.
+Sau khi service account có quyền truy cập Sheet, task chỉ được ghi khi người dùng bấm **Confirm** trên card và `GOOGLE_SHEETS_WRITE_ENABLED=true`. Dashboard hiển thị trạng thái cấu hình và quyền truy cập của service account.
 
-Nếu Google trả lỗi `Google Sheets API has not been used ... or it is disabled`, mở **APIs & Services → Library**, tìm `Google Sheets API` trong đúng project của OAuth client và bấm **Enable**. Nếu OAuth consent screen đang ở chế độ Testing, thêm tài khoản đăng nhập vào danh sách **Test users**.
+Nếu dashboard báo chưa truy cập được Sheet, kiểm tra `GOOGLE_SHEETS_SPREADSHEET_ID` và share Sheet cho đúng `client_email` với quyền **Editor**. Nếu Google báo Sheets API chưa được bật, mở **APIs & Services → Library**, tìm **Google Sheets API** trong project của service account rồi bấm **Enable**.
 
 Google Sheet dùng chín cột theo đúng thứ tự `ID`, `Task`, `PIC`, `Deadline`, `Priority`, `Status`, `CreatedAt`, `UpdatedAt`, `Creator` trong vùng `GOOGLE_SHEETS_RANGE`. `GOOGLE_SHEETS_SPREADSHEET_ID` có thể là ID thuần hoặc full URL của spreadsheet. Khi bật ghi Sheet, task chỉ được append sau khi Confirm; các draft đã ghi sẽ được update đúng dòng khi người dùng chỉnh sửa và Confirm lại. Với task đã ghi, PIC hoặc Creator có thể đổi Priority, Deadline và Status bằng tin nhắn quote, Task ID hoặc các nút trên card cập nhật. Nếu cột Creator trống thì chỉ PIC được chỉnh sửa. Server chống ghi trùng khi SeaTalk gửi lại cùng `event_id` hoặc `message_id`. Nút **Gửi tin nhắn thử** chỉ kiểm tra extraction và không gửi card/ghi dòng demo vào Sheet.
 
-Hiện tại chế độ ghi Sheet vẫn tắt mặc định bằng `GOOGLE_SHEETS_WRITE_ENABLED=false`. Dashboard vẫn hiển thị bảng **Thông tin sau khi extract payload** realtime. Khi muốn bật ghi, đặt biến này thành `true`, restart server và bấm **Kết nối Google**.
+Hiện tại chế độ ghi Sheet vẫn tắt mặc định bằng `GOOGLE_SHEETS_WRITE_ENABLED=false`. Dashboard vẫn hiển thị bảng **Thông tin sau khi extract payload** realtime. Khi muốn bật ghi, đặt biến này thành `true` và restart server.
 
 Nếu muốn dùng Compass trực tiếp (theo mẫu project `Claude`), đặt `TASK_EXTRACTOR=compass`, `COMPASS_API_KEY`, `COMPASS_BASE_URL` và `COMPASS_MODEL`.
 
@@ -106,14 +103,11 @@ Nếu muốn dùng Compass trực tiếp (theo mẫu project `Claude`), đặt `
 - `POST /seatalk/callback` và `POST /webhook/seatalk` — alias callback.
 - `GET /api/messages` — danh sách event đang nằm trong bộ nhớ.
 - `GET /api/stream` — kênh SSE để cập nhật dashboard realtime.
-- `GET /auth/google` — bắt đầu đăng nhập Google OAuth.
-- `GET /auth/google/callback` — callback OAuth của Google.
-- `GET /api/google/status` — trạng thái cấu hình và tài khoản Google đang kết nối.
-- `POST /api/google/disconnect` — xóa OAuth token local.
+- `GET /api/google/status` — trạng thái cấu hình service account và quyền truy cập Sheet.
 - `POST /api/test-message` — tạo một event mẫu local.
 - `DELETE /api/messages` — xóa lịch sử hiện tại.
 
-`GET /api/health` trả thêm trạng thái extractor, outbound SeaTalk và Google Sheets (`taskExtractor`, `taskExtractionConfigured`, `seatalkConfigured`, `googleSheetsWriteEnabled`, `googleSheetsConfigured`, `googleSheetsAuthorized`, `googleAccountEmail`).
+`GET /api/health` trả thêm trạng thái extractor, outbound SeaTalk và Google Sheets (`taskExtractor`, `taskExtractionConfigured`, `seatalkConfigured`, `googleSheetsWriteEnabled`, `googleSheetsConfigured`, `googleSheetsAuthorized`, `googleServiceAccountEmail`).
 
 Lịch sử hiện chỉ lưu trong bộ nhớ và sẽ reset khi restart server; đây là chủ ý để bản đầu tập trung vào việc nhận và quan sát callback.
 

@@ -1,10 +1,11 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { createTaskExtractor, extractPayloadHints } from "./src/task-extractor.js";
 import { GoogleSheetsClient } from "./src/google-sheets.js";
+import { GoogleServiceAccountTokenProvider } from "./src/google-service-account.js";
 import {
   SeaTalkClient,
   buildConfirmationMessage,
@@ -66,8 +67,7 @@ const seatalk = new SeaTalkClient({
 const chatflowUrl = process.env.CHATFLOW_API_URL || "";
 const chatflowToken = process.env.CHATFLOW_API_TOKEN || "";
 const googleSheetsWriteEnabled = String(process.env.GOOGLE_SHEETS_WRITE_ENABLED || "false").toLowerCase() === "true";
-const googleOAuthRedirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || `http://localhost:${port}/auth/google/callback`;
-const googleOAuthTokenPath = resolve(root, process.env.GOOGLE_OAUTH_TOKEN_PATH || ".oauth/google-token.json");
+const googleServiceAccountKeyPath = resolve(root, process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || ".auth/google-service-account.json");
 const taskExtractor = createTaskExtractor({
   provider: process.env.TASK_EXTRACTOR || "auto",
   chatflowUrl,
@@ -77,19 +77,16 @@ const taskExtractor = createTaskExtractor({
   compassApiKey: process.env.COMPASS_API_KEY || "",
   compassModel: process.env.COMPASS_MODEL || "compass-max",
 });
+const googleTokenProvider = new GoogleServiceAccountTokenProvider({ keyPath: googleServiceAccountKeyPath });
 const googleSheets = new GoogleSheetsClient({
   spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "",
   sheetName: process.env.GOOGLE_SHEETS_SHEET_NAME || "Sheet1",
   range: process.env.GOOGLE_SHEETS_RANGE || "A:I",
-  oauthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
-  oauthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
-  oauthRedirectUri: googleOAuthRedirectUri,
-  tokenPath: googleOAuthTokenPath,
+  tokenProvider: googleTokenProvider,
 });
 const maxMessages = 100;
 const messages = [];
 const clients = new Set();
-const oauthStates = new Map();
 const threadSessions = new Map();
 const confirmationDrafts = new Map();
 const sheetUpdateDrafts = new Map();
@@ -587,8 +584,8 @@ async function processSheetTaskUpdateById(record, taskId, intent = null) {
     return;
   }
   if (!googleSheets.isConfigured() || !googleSheets.isAuthorized()) {
-    updateProcessing(record, { sheet: { status: "auth_required", error: "Google Sheets OAuth chưa sẵn sàng." } });
-    await sendSheetUpdateText(record, "Chưa thể tìm task vì Google Sheets chưa được kết nối.");
+    updateProcessing(record, { sheet: { status: "auth_required", error: "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet." } });
+    await sendSheetUpdateText(record, "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     return;
   }
 
@@ -1053,13 +1050,13 @@ async function confirmTaskInternal(value, clickRecord, pending, session, task) {
     return { handled: true, blocked: true };
   }
   if (!googleSheets.isConfigured()) {
-    updateProcessing(record, { sheet: { status: "not_configured", error: "Google Sheets OAuth chưa được cấu hình." }, confirmation: { status: "blocked" } });
-    await sendConfirmationResult(session, "Chưa thể ghi task vì Google Sheets OAuth chưa được cấu hình.");
+    updateProcessing(record, { sheet: { status: "not_configured", error: "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet." }, confirmation: { status: "blocked" } });
+    await sendConfirmationResult(session, "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     return { handled: true, blocked: true };
   }
   if (!googleSheets.isAuthorized()) {
-    updateProcessing(record, { sheet: { status: "auth_required", error: "Chưa kết nối Google. Mở nút Kết nối Google trên website." }, confirmation: { status: "blocked" } });
-    await sendConfirmationResult(session, "Chưa thể ghi task vì bot chưa được kết nối Google Sheets.");
+    updateProcessing(record, { sheet: { status: "auth_required", error: "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet." }, confirmation: { status: "blocked" } });
+    await sendConfirmationResult(session, "Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     return { handled: true, blocked: true };
   }
 
@@ -1230,56 +1227,6 @@ function handleStream(request, response) {
   request.on("close", () => clients.delete(response));
 }
 
-function redirect(response, location) {
-  response.writeHead(302, {
-    Location: location,
-    "Cache-Control": "no-store",
-  });
-  response.end();
-}
-
-function removeExpiredOAuthStates() {
-  const now = Date.now();
-  for (const [state, expiresAt] of oauthStates) {
-    if (expiresAt <= now) oauthStates.delete(state);
-  }
-}
-
-async function startGoogleAuthorization(response) {
-  if (!googleSheets.isConfigured()) {
-    redirect(response, "/?google=not-configured");
-    return;
-  }
-  removeExpiredOAuthStates();
-  const state = randomBytes(32).toString("hex");
-  oauthStates.set(state, Date.now() + 10 * 60 * 1000);
-  redirect(response, googleSheets.getAuthorizationUrl(state));
-}
-
-async function handleGoogleCallback(url, response) {
-  if (url.searchParams.get("error")) {
-    redirect(response, "/?google=cancelled");
-    return;
-  }
-
-  const state = url.searchParams.get("state") || "";
-  const code = url.searchParams.get("code") || "";
-  const expiresAt = oauthStates.get(state);
-  oauthStates.delete(state);
-  if (!state || !expiresAt || expiresAt <= Date.now() || !code) {
-    sendJson(response, 400, { ok: false, error: "Google OAuth state hoặc code không hợp lệ" });
-    return;
-  }
-
-  try {
-    await googleSheets.authorizeWithCode(code);
-    redirect(response, "/?google=connected");
-  } catch (error) {
-    console.error("Google OAuth callback failed:", error.message);
-    redirect(response, "/?google=error");
-  }
-}
-
 function shouldProcessMessage(record) {
   if (record?.parsed?.kind !== "message") return false;
   if (record.parsed.eventType === "new_message_received_from_thread") {
@@ -1378,28 +1325,17 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.method === "GET" && pathname === "/auth/google") {
-    await startGoogleAuthorization(response);
-    return;
-  }
-
-  if (request.method === "GET" && pathname === "/auth/google/callback") {
-    await handleGoogleCallback(url, response);
-    return;
-  }
-
   if (request.method === "GET" && pathname === "/api/google/status") {
     sendJson(response, 200, {
       ...googleSheets.getStatus(),
       writeEnabled: googleSheetsWriteEnabled,
-      redirectUri: googleOAuthRedirectUri,
+      sheetAccess: await googleSheets.checkSheetAccess(),
     });
     return;
   }
 
-  if (request.method === "POST" && pathname === "/api/google/disconnect") {
-    googleSheets.disconnect();
-    sendJson(response, 200, { ok: true });
+  if (pathname === "/auth/google" || pathname === "/auth/google/callback" || pathname === "/api/google/disconnect") {
+    sendJson(response, 404, { ok: false, error: "Không tìm thấy trang" });
     return;
   }
 
@@ -1415,7 +1351,7 @@ const server = createServer(async (request, response) => {
       googleSheetsWriteEnabled,
       googleSheetsConfigured: googleSheets.isConfigured(),
       googleSheetsAuthorized: googleSheets.isAuthorized(),
-      googleAccountEmail: googleSheets.getStatus().accountEmail,
+      googleServiceAccountEmail: googleSheets.getStatus().accountEmail,
     });
     return;
   }

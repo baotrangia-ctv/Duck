@@ -568,30 +568,24 @@ test("task row follows the Google Sheet A-I contract", () => {
 test("Google Sheets client accepts a spreadsheet URL as the ID", () => {
   const client = new GoogleSheetsClient({
     spreadsheetId: "https://docs.google.com/spreadsheets/d/abc123_XYZ/edit#gid=0",
-    oauthClientId: "client-id",
-    oauthClientSecret: "client-secret",
-    oauthRedirectUri: "http://localhost:3030/auth/google/callback",
-    tokenPath: "test/.oauth-not-used.json",
+    tokenProvider: {
+      isConfigured: () => true,
+      getAccountEmail: () => "sheets@example.com",
+      getAccessToken: async () => "access-token",
+    },
   });
   assert.equal(client.spreadsheetId, "abc123_XYZ");
   assert.equal(client.range, "A:I");
   assert.equal(client.isConfigured(), true);
 });
 
-test("Google Sheets client builds an OAuth authorization URL", () => {
+test("Google Sheets client requires a configured service account token provider", () => {
   const client = new GoogleSheetsClient({
     spreadsheetId: "sheet-id",
-    oauthClientId: "client-id",
-    oauthClientSecret: "client-secret",
-    oauthRedirectUri: "http://localhost:3030/auth/google/callback",
-    tokenPath: "test/.oauth-not-used.json",
+    tokenProvider: { isConfigured: () => false },
   });
-  const url = new URL(client.getAuthorizationUrl("csrf-state"));
-  assert.equal(url.origin, "https://accounts.google.com");
-  assert.equal(url.searchParams.get("client_id"), "client-id");
-  assert.equal(url.searchParams.get("redirect_uri"), "http://localhost:3030/auth/google/callback");
-  assert.equal(url.searchParams.get("state"), "csrf-state");
-  assert.equal(url.searchParams.get("access_type"), "offline");
+  assert.equal(client.isConfigured(), false);
+  assert.equal(client.isAuthorized(), false);
 });
 
 test("rules extractor preserves draft context when a user only changes the deadline", async () => {

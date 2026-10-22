@@ -1,17 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import { findMatchingSheetTasks, sheetRowToTask } from "./sheet-task-updates.js";
 
-const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets";
-const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "openid",
-  "email",
-  "profile",
-];
 
 function normalizeSpreadsheetId(value) {
   const raw = String(value || "").trim();
@@ -49,129 +38,35 @@ class GoogleSheetsClient {
     spreadsheetId = "",
     sheetName = "Sheet1",
     range = "A:I",
-    oauthClientId = "",
-    oauthClientSecret = "",
-    oauthRedirectUri = "",
-    tokenPath = ".oauth/google-token.json",
+    tokenProvider = null,
+    fetchImpl = (...args) => fetch(...args),
+    now = Date.now,
   } = {}) {
     this.spreadsheetId = normalizeSpreadsheetId(spreadsheetId);
     this.sheetName = sheetName;
     this.range = range;
-    this.oauthClientId = oauthClientId;
-    this.oauthClientSecret = oauthClientSecret;
-    this.oauthRedirectUri = oauthRedirectUri;
-    this.tokenPath = tokenPath;
-    this.tokens = null;
+    this.tokenProvider = tokenProvider;
+    this.fetchImpl = fetchImpl;
+    this.now = now;
+    this.authorized = this.isConfigured();
+    this.sheetAccessCache = null;
     this.appendQueue = Promise.resolve();
-    this.loadTokens();
   }
 
   isConfigured() {
-    return Boolean(
-      this.spreadsheetId &&
-        this.oauthClientId &&
-        this.oauthClientSecret &&
-        this.oauthRedirectUri
-    );
+    return Boolean(this.spreadsheetId && this.tokenProvider?.isConfigured?.());
   }
 
   isAuthorized() {
-    this.loadTokens();
-    return Boolean(this.tokens?.refresh_token || this.tokens?.access_token);
+    return this.isConfigured() && this.authorized;
   }
 
   getStatus() {
-    this.loadTokens();
     return {
       configured: this.isConfigured(),
       authorized: this.isAuthorized(),
-      accountEmail: this.tokens?.accountEmail || "",
+      accountEmail: this.tokenProvider?.getAccountEmail?.() || "",
     };
-  }
-
-  getAuthorizationUrl(state) {
-    if (!this.isConfigured()) {
-      throw new Error("Google OAuth chưa được cấu hình");
-    }
-
-    const params = new URLSearchParams({
-      client_id: this.oauthClientId,
-      redirect_uri: this.oauthRedirectUri,
-      response_type: "code",
-      scope: GOOGLE_SCOPES.join(" "),
-      access_type: "offline",
-      prompt: "consent",
-      include_granted_scopes: "true",
-      state,
-    });
-    return `${AUTH_URL}?${params}`;
-  }
-
-  loadTokens() {
-    if (this.tokens || !this.tokenPath || !existsSync(this.tokenPath)) return;
-    try {
-      this.tokens = JSON.parse(readFileSync(this.tokenPath, "utf8"));
-    } catch {
-      this.tokens = null;
-    }
-  }
-
-  saveTokens(tokens) {
-    this.tokens = { ...this.tokens, ...tokens };
-    mkdirSync(dirname(this.tokenPath), { recursive: true });
-    writeFileSync(this.tokenPath, `${JSON.stringify(this.tokens, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-  }
-
-  async authorizeWithCode(code) {
-    if (!this.isConfigured()) {
-      throw new Error("Google OAuth chưa được cấu hình");
-    }
-
-    const response = await fetch(TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: this.oauthClientId,
-        client_secret: this.oauthClientSecret,
-        redirect_uri: this.oauthRedirectUri,
-        grant_type: "authorization_code",
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(`Google OAuth HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
-    }
-
-    const data = await response.json();
-    const accountEmail = await this.fetchAccountEmail(data.access_token);
-    this.saveTokens({
-      ...data,
-      accountEmail: accountEmail || this.tokens?.accountEmail || "",
-      expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000,
-    });
-    return this.getStatus();
-  }
-
-  async fetchAccountEmail(accessToken) {
-    if (!accessToken) return "";
-    try {
-      const response = await fetch(USERINFO_URL, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!response.ok) return "";
-      const data = await response.json();
-      return data.email || "";
-    } catch {
-      return "";
-    }
-  }
-
-  disconnect() {
-    this.tokens = null;
-    if (this.tokenPath && existsSync(this.tokenPath)) unlinkSync(this.tokenPath);
   }
 
   targetRange() {
@@ -179,51 +74,63 @@ class GoogleSheetsClient {
   }
 
   async getAccessToken() {
-    this.loadTokens();
-    if (!this.tokens) {
-      throw new Error("Chưa kết nối Google. Mở nút Kết nối Google trên website trước.");
+    if (!this.isConfigured()) throw new Error("Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
+    try {
+      const token = await this.tokenProvider.getAccessToken();
+      this.authorized = true;
+      return token;
+    } catch {
+      this.authorized = false;
+      throw new Error("Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     }
+  }
 
-    if (this.tokens.access_token && Date.now() < Number(this.tokens.expiresAt || 0) - 60_000) {
-      return this.tokens.access_token;
+  errorForStatus(status) {
+    if (status === 403) {
+      const email = this.tokenProvider?.getAccountEmail?.() || "service account";
+      return new Error(`Chưa truy cập được Google Sheet. Hãy share Sheet cho ${email} với quyền Editor.`);
     }
-
-    if (!this.tokens.refresh_token) {
-      throw new Error("Phiên Google đã hết hạn. Hãy kết nối Google lại trên website.");
+    if (status === 404) {
+      return new Error("Không tìm thấy Google Sheet. Kiểm tra GOOGLE_SHEETS_SPREADSHEET_ID và quyền share.");
     }
+    return new Error(`Google Sheets HTTP ${status}`);
+  }
 
-    const response = await fetch(TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: this.oauthClientId,
-        client_secret: this.oauthClientSecret,
-        refresh_token: this.tokens.refresh_token,
-        grant_type: "refresh_token",
-      }),
+  async request(endpoint, options = {}) {
+    const token = options.token || await this.getAccessToken();
+    const { token: unusedToken, ...requestOptions } = options;
+    const response = await this.fetchImpl(endpoint, {
+      ...requestOptions,
+      headers: { ...(requestOptions.headers || {}), Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      throw new Error(`Google OAuth refresh HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
+      if (response.status === 401 || response.status === 403) this.authorized = false;
+      throw this.errorForStatus(response.status);
     }
+    this.authorized = true;
+    return response;
+  }
 
-    const data = await response.json();
-    this.saveTokens({
-      ...data,
-      refresh_token: data.refresh_token || this.tokens.refresh_token,
-      accountEmail: this.tokens.accountEmail || "",
-      expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000,
-    });
-    return this.tokens.access_token;
+  async checkSheetAccess() {
+    if (!this.isConfigured()) return null;
+    if (this.sheetAccessCache && this.now() - this.sheetAccessCache.checkedAt < 60_000) {
+      return this.sheetAccessCache.value;
+    }
+    const endpoint = `${SHEETS_API}/${encodeURIComponent(this.spreadsheetId)}?fields=spreadsheetId`;
+    let value = false;
+    try {
+      await this.request(endpoint);
+      value = true;
+    } catch {
+      value = false;
+    }
+    this.sheetAccessCache = { value, checkedAt: this.now() };
+    return value;
   }
 
   async readValues(range, token) {
     const endpoint = `${SHEETS_API}/${encodeURIComponent(this.spreadsheetId)}/values/${encodeURIComponent(range)}`;
-    const response = await fetch(endpoint, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      throw new Error(`Google Sheets HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
-    }
+    const response = await this.request(endpoint, token ? { token } : {});
     const data = await response.json();
     return Array.isArray(data.values) ? data.values : [];
   }
@@ -263,33 +170,20 @@ class GoogleSheetsClient {
   }
 
   async _appendTask(task) {
-    if (!this.isConfigured()) {
-      throw new Error("Google Sheets OAuth chưa được cấu hình");
-    }
-
+    if (!this.isConfigured()) throw new Error("Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     const token = await this.getAccessToken();
     const taskId = await this.nextTaskId(token);
     const endpoint = `${SHEETS_API}/${encodeURIComponent(this.spreadsheetId)}/values/${encodeURIComponent(this.targetRange())}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-    const response = await fetch(endpoint, {
+    const response = await this.request(endpoint, {
+      token,
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ values: buildTaskRow({ ...task, id: taskId }) }),
     });
-    if (!response.ok) {
-      throw new Error(`Google Sheets HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
-    }
-
     const data = await response.json();
     const updatedRange = data.updates?.updatedRange || "";
     const rowMatch = updatedRange.match(/!(?:[A-Z]+)(\d+)/i);
-    return {
-      taskId,
-      updatedRange,
-      rowNumber: rowMatch ? Number(rowMatch[1]) : null,
-    };
+    return { taskId, updatedRange, rowNumber: rowMatch ? Number(rowMatch[1]) : null };
   }
 
   async updateTask(rowNumber, task) {
@@ -305,13 +199,10 @@ class GoogleSheetsClient {
   }
 
   async _updateTaskIfStatus(rowNumber, task, expectedStatus) {
-    if (!this.isConfigured()) {
-      throw new Error("Google Sheets OAuth chưa được cấu hình");
-    }
+    if (!this.isConfigured()) throw new Error("Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     if (!Number.isInteger(Number(rowNumber)) || Number(rowNumber) < 2) {
       throw new Error("Không xác định được dòng task cần update trong Google Sheet");
     }
-
     const token = await this.getAccessToken();
     const row = Number(rowNumber);
     const range = `${this.sheetName}!A${row}:I${row}`;
@@ -321,27 +212,21 @@ class GoogleSheetsClient {
     if (!currentTask || String(currentTask.id) !== String(taskId)) {
       return { updated: false, notFound: true, task: currentTask, rowNumber: row };
     }
-
     const currentStatus = String(currentTask.status || "TODO").trim().toUpperCase().replace(/\s+/g, " ");
     const expected = String(expectedStatus || "").trim().toUpperCase().replace(/\s+/g, " ");
     const matchesExpected = currentStatus === expected || (expected === "TODO" && currentStatus === "TO DO");
     if (!matchesExpected) return { updated: false, task: currentTask, rowNumber: row };
-
     const result = await this._writeTaskRow(row, { ...currentTask, ...task }, token);
     return { ...result, updated: true, task: { ...currentTask, ...task } };
   }
 
   async _updateTask(rowNumber, task) {
-    if (!this.isConfigured()) {
-      throw new Error("Google Sheets OAuth chưa được cấu hình");
-    }
+    if (!this.isConfigured()) throw new Error("Google Sheets chưa sẵn sàng. Kiểm tra service account và quyền share Sheet.");
     if (!Number.isInteger(Number(rowNumber)) || Number(rowNumber) < 2) {
       throw new Error("Không xác định được dòng task cần update trong Google Sheet");
     }
-
     const token = await this.getAccessToken();
-    const row = Number(rowNumber);
-    return this._writeTaskRow(row, task, token);
+    return this._writeTaskRow(Number(rowNumber), task, token);
   }
 
   async _writeTaskRow(row, task, token) {
@@ -352,27 +237,17 @@ class GoogleSheetsClient {
       creator = existingRows[0]?.[8] ?? "";
     }
     const endpoint = `${SHEETS_API}/${encodeURIComponent(this.spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
-    const response = await fetch(endpoint, {
+    const response = await this.request(endpoint, {
+      token,
       method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         majorDimension: "ROWS",
         values: buildTaskRow({ ...task, creator, id: task.id ?? task.taskId }),
       }),
     });
-    if (!response.ok) {
-      throw new Error(`Google Sheets HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
-    }
-
     const data = await response.json();
-    return {
-      taskId: task.id ?? task.taskId ?? null,
-      updatedRange: data.updatedRange || range,
-      rowNumber: row,
-    };
+    return { taskId: task.id ?? task.taskId ?? null, updatedRange: data.updatedRange || range, rowNumber: row };
   }
 }
 
