@@ -463,7 +463,7 @@ function extractDeadlineText(value, referenceDate = getReferenceDate(), holidayD
   const time = `(?:lúc\\s+)?\\d{1,2}(?::\\d{2})?\\s*(?:giờ|gio|h)\\s*(?:${daypartNames})?\\s*${relative}`;
   const daypart = `(?:${daypartNames})\\s+${relative}`;
   const date = "(?:(?:ngày|ngay)\\s+)?\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2}\\s+tháng\\s+\\d{1,2}(?:\\s+năm\\s+\\d{4})?|(?:ngày|ngay|day)\\s+\\d{1,2}";
-  const weekday = "(?:chủ\\s+nhật|chu\\s+nhat|sunday|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|thu\\s+(?:[2-7]|hai|ba|tu|nam|sau|bay)|t[2-7])(?:\\s+(?:(?:tuần|tuan)\\s+(?:sau\\s+nữa|sau|tới|này|trước)|hai\\s+(?:tuần|tuan)\\s+tới|này|nay|sau|tới|trước|next\\s+week|this\\s+week))?";
+  const weekday = "(?:chủ\\s+nhật|chu\\s+nhat|sunday|monday|tuesday|wednesday|thursday|friday|saturday|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)|thu\\s+(?:[2-7]|hai|ba|tu|nam|sau|bay)|t[2-7])(?:\\s+(?:(?:tuần|tuan)\\s+(?:sau\\s+nữa|sau|tới|này|trước)|hai\\s+(?:tuần|tuan)\\s+tới|này|nay|sau|tới|trước|next\\s+week|this\\s+week))?";
   const periods = "(?:đầu|dau|giữa|giua|cuối|cuoi)\\s+(?:tuần|tuan|tháng|thang)(?:\\s+(?:này|nay|sau|tới|trước))?|(?:trong\\s+)?(?:tuần|tuan)\\s+(?:sau\\s+nữa|sau|tới|này|trước)|hai\\s+(?:tuần|tuan)\\s+tới|cuối\\s+ngày|cuoi\\s+ngay|eod|cob";
   const amount = "(?:(?:sau|trong)\\s+)?\\d+\\s*(?:ngày|ngay|days?|tuần|tuan|weeks?|tháng|thang|months?)(?:\\s+nữa)?";
   const range = "(?:từ\\s+)?(?:ngày\\s+)?\\d{1,2}(?:[/.]\\d{1,2})?\\s*(?:đến|tới|to|[-–])\\s*\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?";
@@ -472,10 +472,11 @@ function extractDeadlineText(value, referenceDate = getReferenceDate(), holidayD
   const options = "iu";
   const leftBoundary = String.raw`(?<![\p{L}\p{N}])`;
   const rightBoundary = String.raw`(?![\p{L}\p{N}])`;
+  const dateRange = source.match(new RegExp(`${leftBoundary}(${range})${rightBoundary}`, options));
   const explicit = source.match(new RegExp(`${leftBoundary}(${prefix})\\s*(?:(?:sang|thành|là|to|vào)\\s*)?[:=-]?\\s*(${deadlineExpression})`, options));
-  const match = explicit || source.match(new RegExp(`${leftBoundary}(${deadlineExpression})${rightBoundary}`, options));
+  const match = dateRange || explicit || source.match(new RegExp(`${leftBoundary}(${deadlineExpression})${rightBoundary}`, options));
   if (!match) return null;
-  const expression = cleanHintText(explicit ? match[2] : match[1]);
+  const expression = cleanHintText(match === explicit ? match[2] : match[1]);
   const matchedText = cleanHintText(match[0]);
   return {
     date: normalizeDeadline(expression, referenceDate, holidayDates),
@@ -517,7 +518,10 @@ function cleanTaskContent(value, { matchedDeadlineText = null, mentions = [], so
 
   content = content
     .replace(/^\s*(?:hãy|hay)\s+(?:log|ghi|tạo|tao)\s+(?:task|công việc)\s+(?:cho\s+)?/iu, "")
+    .replace(/^\s*(?:task(?:\s+content)?|nội dung(?:\s+(?:task|công việc))?)\s*[:=-]\s*/iu, "")
     .replace(/^\s*(?:giao\s+cho|phụ\s+trách|log\s+task\s+cho|(?:tạo|tao|ghi)\s+(?:task|công việc)\s+cho|assigned\s+to|assign\s+to)\s+/iu, "")
+    .replace(/(?<![\p{L}\p{N}])(?:priority|mức\s+độ\s+ưu\s+tiên|độ\s+ưu\s+tiên|ưu\s+tiên)\s*[:=-]?\s*p[012](?![\p{L}\p{N}])/giu, " ")
+    .replace(/(?<![\p{L}\p{N}])(?:không\s+gấp|bình\s+thường|normal|urgent|asap|khẩn\s+cấp|rất\s+gấp|làm\s+gấp|gấp)(?![\p{L}\p{N}])/giu, " ")
     .replace(/^\s*(?:hãy|hay|please|làm\s+ơn|cần|phải|sẽ|nhờ|giúp)\s+/iu, "")
     .replace(/^\s*(?:tôi|mình|em|tớ|tui|me|myself)\s+/iu, "")
     .replace(/^\s*(?:cần|phải|sẽ)\s+/iu, "")
@@ -525,7 +529,7 @@ function cleanTaskContent(value, { matchedDeadlineText = null, mentions = [], so
     .replace(/(?:^|\s+)(?:nhé|nha|nhá|ạ|với|nhờ|giúp|làm\s+ơn|please|thanks)[.!?,;]*\s*$/iu, " ")
     .replace(/\s{2,}/g, " ");
 
-  const cleaned = cleanHintText(content.replace(/[.!?]+$/g, ""));
+  const cleaned = cleanHintText(content.replace(/^[\s,;:|!?.-]+|[.!?]+$/g, ""));
   if (!cleaned) return null;
   return cleaned[0].toLocaleUpperCase("vi-VN") + cleaned.slice(1);
 }

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, EXTRACTION_PROMPT, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
 import { isConfirmationClickAuthorized } from "../src/confirmation-auth.js";
@@ -186,6 +187,56 @@ test("LLM task content takes precedence over the payload hint", async () => {
   }
 });
 
+test("mock LLM resolves the original case from deadline_expression when deadline is null", async () => {
+  const text = "@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé";
+  const payload = {
+    event: {
+      message: {
+        text: {
+          plain_text: text,
+          mentioned_list: [
+            { username: "bot", location: 0, length: 4 },
+            { username: "userA", email: "userA@example.com", location: 5, length: 6 },
+          ],
+        },
+      },
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({
+      task: "Document hướng dẫn deploy web",
+      pic: null,
+      deadline_expression: "6h chiều nay",
+      deadline: null,
+      priority: null,
+      priority_reason: "from_deadline",
+      status: null,
+    }) } }] }),
+  });
+
+  try {
+    const extractor = createTaskExtractor({
+      provider: "compass",
+      compassApiKey: "mock-key",
+      referenceDate: "2026-10-22",
+    });
+    const result = await extractor.extract(text, payload);
+    assert.deepEqual(result, {
+      pic: "userA@example.com",
+      deadline: "22/10/2026",
+      taskContent: "Document hướng dẫn deploy web",
+      priority: "P0",
+      status: "IN PROGRESS",
+      source: "compass",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rules provider derives priority from deadline unless the user labels it", async () => {
   const cases = [
     ["22/10/2026", "P0"],
@@ -205,6 +256,59 @@ test("rules provider derives priority from deadline unless the user labels it", 
     assert.equal(result.deadline, deadline);
     assert.equal(result.priority, expectedPriority, `deadline ${deadline} with ${prefix || "no priority label"}`);
   }
+});
+
+test("rules extraction matches every deadline and task in the few-shot examples", async () => {
+  const examples = [
+    ["@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé", "22/10/2026", "P0", "Document hướng dẫn deploy web"],
+    ["@userA fix bug login trước 9h sáng mai", "23/10/2026", "P0", "Fix bug login"],
+    ["@userA làm report doanh thu thứ 6 này", "23/10/2026", "P0", "Làm report doanh thu"],
+    ["@userA review PR thứ 2 tuần sau", "26/10/2026", "P2", "Review PR"],
+    ["@userA update dashboard trong tuần này", "23/10/2026", "P0", "Update dashboard"],
+    ["@userA gấp! sửa crash client", "22/10/2026", "P0", "Sửa crash client"],
+    ["@userA viết tài liệu API, không gấp", "29/10/2026", "P2", "Viết tài liệu API"],
+    ["@userA test build 25/10", "25/10/2026", "P1", "Test build"],
+    ["@userA deploy staging 3 ngày nữa", "25/10/2026", "P1", "Deploy staging"],
+    ["@userA báo cáo cuối tháng, priority P1", "31/10/2026", "P1", "Báo cáo"],
+  ];
+
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+  for (const [message, deadline, priority, taskContent] of examples) {
+    const result = await extractor.extract(message, { event_type: "message" });
+    assert.equal(result.deadline, deadline, message);
+    assert.equal(result.priority, priority, message);
+    assert.equal(result.taskContent, taskContent, message);
+  }
+});
+
+test("extraction eval fixtures include 40 cases with field expectations", () => {
+  const cases = JSON.parse(readFileSync(new URL("./fixtures/extraction-cases.json", import.meta.url), "utf8"));
+  assert.ok(cases.length >= 40);
+  for (const item of cases) {
+    assert.equal(typeof item.message, "string");
+    assert.ok(item.message.length > 0);
+    assert.match(item.deadline, /^\d{2}\/\d{2}\/\d{4}$/);
+    assert.ok(["P0", "P1", "P2"].includes(item.priority));
+    assert.equal(typeof item.task, "string");
+    assert.ok(item.task.length > 0);
+  }
+});
+
+test("rules provider matches every extraction eval fixture", async () => {
+  const cases = JSON.parse(readFileSync(new URL("./fixtures/extraction-cases.json", import.meta.url), "utf8"));
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+
+  for (const item of cases) {
+    const result = await extractor.extract(item.message, { event_type: "message" });
+    assert.equal(result.deadline, item.deadline, item.message);
+    assert.equal(result.priority, item.priority, item.message);
+    assert.equal(result.taskContent, item.task, item.message);
+  }
+});
+
+test("package exposes the extraction evaluation script", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.scripts["eval:extract"], "node test/eval-extract");
 });
 
 test("priority follows the policy for ISO deadlines", () => {
