@@ -23,6 +23,7 @@ import {
   isSheetUpdateClickAuthorized,
   isTaskMessageUpdateAuthorized,
 } from "./src/confirmation-auth.js";
+import { handleTaskAcknowledgement as processTaskAcknowledgement } from "./src/task-acknowledgement.js";
 import { parseConfirmationButtonValue } from "./src/confirmation-routing.js";
 import {
   detectTaskIntent,
@@ -247,7 +248,7 @@ function initialProcessingState() {
       deadline: null,
       taskContent: null,
       priority: null,
-      taskStatus: "IN PROGRESS",
+      taskStatus: "TODO",
       creator: null,
       createdAt: null,
       updatedAt: null,
@@ -291,12 +292,13 @@ function addMessage(payload, receivedAt = new Date().toISOString()) {
 }
 
 function updateProcessing(record, patch) {
+  const current = record.processing || initialProcessingState();
   record.processing = {
-    ...record.processing,
+    ...current,
     ...patch,
-    extraction: { ...record.processing.extraction, ...(patch.extraction || {}) },
-    sheet: { ...record.processing.sheet, ...(patch.sheet || {}) },
-    confirmation: { ...record.processing.confirmation, ...(patch.confirmation || {}) },
+    extraction: { ...current.extraction, ...(patch.extraction || {}) },
+    sheet: { ...current.sheet, ...(patch.sheet || {}) },
+    confirmation: { ...current.confirmation, ...(patch.confirmation || {}) },
   };
   broadcast({ type: "processing", id: record.id, processing: record.processing });
 }
@@ -390,7 +392,7 @@ function draftFromFields(fields, task, record) {
     pic: fields.pic,
     deadline: fields.deadline,
     priority: fields.priority,
-    status: fields.status || "IN PROGRESS",
+    status: fields.status || "TODO",
     creator: normalizeEmail(task.creatorEmail) || "",
     createdAt,
     updatedAt: new Date().toISOString(),
@@ -670,7 +672,7 @@ async function processSheetTaskUpdate(record, intent) {
     return;
   }
   if (intent.fields.status && !extractRequestedStatus(record.parsed.text)) {
-    await sendSheetUpdateText(record, "Vui lòng nêu Status mới: IN PROGRESS, DONE hoặc NOT DO.");
+    await sendSheetUpdateText(record, "Vui lòng nêu Status mới: TODO, IN PROGRESS, DONE hoặc NOT DO.");
     updateProcessing(record, { sheet: { status: "status_value_required" } });
     return;
   }
@@ -900,7 +902,7 @@ async function requireReferencedSheetTaskUpdate(record, taskId) {
     return;
   }
   if (intent.fields.status && !extractRequestedStatus(record.parsed.text)) {
-    await sendSheetUpdateText(record, "Vui lòng nêu Status mới: IN PROGRESS, DONE hoặc NOT DO.");
+    await sendSheetUpdateText(record, "Vui lòng nêu Status mới: TODO, IN PROGRESS, DONE hoặc NOT DO.");
     updateProcessing(record, { sheet: { status: "status_value_required" } });
     return;
   }
@@ -998,6 +1000,20 @@ async function sendTaskAssignmentNotification(task, draft) {
   const employeeCode = task.picEmployeeCode;
   if (!employeeCode) throw new Error("Không xác định được employee_code của PIC để gửi thông báo giao task.");
   return seatalk.sendSingleChat(employeeCode, buildTaskAssignmentMessage(draft));
+}
+
+async function acknowledgeTask(value, clickRecord) {
+  const action = parseConfirmationButtonValue(value);
+  if (!action || action.kind !== "task_ack") return { handled: false, error: "Nút xác nhận nhận task không hợp lệ." };
+
+  const result = await processTaskAcknowledgement(action.taskId, clickRecord, {
+    googleSheets,
+    googleSheetsWriteEnabled,
+    seatalk,
+    updateProcessing,
+  });
+  if (result.messageId) rememberSheetMessage(result.messageId, action.taskId);
+  return result;
 }
 
 async function updateConfirmationCardAfterConfirm(task, draft) {
@@ -1307,6 +1323,7 @@ async function handleWebhook(request, response) {
   if (!duplicate && record.parsed.kind === "interaction") {
     const action = parseConfirmationButtonValue(record.parsed.buttonValue);
     if (action?.kind === "confirm") void confirmTask(record.parsed.buttonValue, record);
+    if (action?.kind === "task_ack") void acknowledgeTask(record.parsed.buttonValue, record);
     if (action?.kind === "priority" || action?.kind === "deadline") {
       void updateDraftFieldAndRedraw(record.parsed.buttonValue, record);
     }

@@ -34,7 +34,7 @@ the chat-completions endpoint and its configured model.
    precedence over model dates; model deadline is a fallback when code cannot resolve one.
 6. mergeRevisionFields compares explicit revision signals and preserves every previous field
    without a matching signal. finalizeFields supplies a deadline, derives priority if needed,
-   and defaults status to IN PROGRESS. cleanTaskContent returns a cleaned, capitalized task
+   and defaults status to TODO. cleanTaskContent returns a cleaned, capitalized task
    string or null.
 
 ## Field precedence and defaults
@@ -45,7 +45,7 @@ the chat-completions endpoint and its configured model.
 | Deadline | Code-resolved message expression/payload hint → code-resolved labeled fallback → model deadline_expression/deadline → priority-derived date → P2's seven-day default. |
 | Priority | Labeled fallback (for example a Priority: P1 field) → inferPriorityFromText → resolved deadline (today/tomorrow/overdue=P0, 2–3 days=P1, later=P2) → P2. Model priority is overwritten by code. |
 | Task | Reasonable model task content → payload/fallback task text; cleanTaskContent strips mentions, date, routing/polite filler, and priority labels. |
-| Status | Parsed/fallback status if valid → IN PROGRESS. Accepted values are IN PROGRESS, DONE, NOT DO. |
+| Status | Parsed/fallback status if valid → TODO. Accepted values are TODO, IN PROGRESS, DONE, NOT DO. |
 | Revision | Existing field is retained unless the new message has an explicit signal for that field. |
 
 The priority rule document says an explicit P0/P1/P2 label wins over urgency wording. The

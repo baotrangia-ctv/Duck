@@ -48,6 +48,9 @@ test("Phase 2 intent extracts Sheet ID and supports Priority/Deadline/Status", (
   });
   assert.equal(extractRequestedStatus("Đổi status task #5 sang DONE"), "DONE");
   assert.equal(extractRequestedStatus("Đổi trạng thái task #5 sang đang làm"), "IN PROGRESS");
+  assert.equal(extractRequestedStatus("Đổi status task #5 sang TODO"), "TODO");
+  assert.equal(extractRequestedStatus("Đổi status task #5 sang TO DO"), "TODO");
+  assert.equal(detectTaskIntent("Đổi status task #5 sang TODO").fields.status, true);
   assert.equal(isStatusOnlyUpdate(detectTaskIntent("Cập nhật task #18 done")), true);
   assert.equal(detectTaskIntent("Cập nhật dashboard trước deadline"), null);
 });
@@ -70,6 +73,7 @@ test("Sheet task row parsing and content matching return row numbers", () => {
     creator: "creator@example.com",
   });
   assert.equal(sheetRowToTask(rows[1].slice(0, 8), 3).creator, "");
+  assert.equal(sheetRowToTask([7, "Task", "pic@example.com", "", "P2", "", "created", "updated"], 4).status, "TODO");
   assert.deepEqual(findMatchingSheetTasks(rows, "sap").map((task) => task.id), [5]);
   assert.deepEqual(findMatchingSheetTasks(rows, "update ui ux").map((task) => task.id), [5, 6]);
 });
@@ -224,6 +228,51 @@ test("Sheet update preserves the existing Creator when omitted from update field
     assert.equal(requestBody.values[0].length, 9);
     assert.equal(requestBody.values[0][8], "creator@example.com");
     assert.equal(result.updatedRange, "Sheet1!A2:I2");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("conditional Sheet status update re-reads before writing and preserves the whole row", async () => {
+  const client = new GoogleSheetsClient({
+    spreadsheetId: "sheet-id",
+    oauthClientId: "client-id",
+    oauthClientSecret: "client-secret",
+    oauthRedirectUri: "http://localhost:3030/auth/google/callback",
+    tokenPath: "test/.oauth-not-used.json",
+  });
+  client.tokens = { access_token: "access-token", expiresAt: Date.now() + 120_000 };
+  let currentStatus = "TODO";
+  client.readValues = async (range) => {
+    assert.equal(range, "Sheet1!A7:I7");
+    return [[42, "Task", "pic@example.com", "30/09/2026", "P1", currentStatus, "created", "old-updated", "creator@example.com"]];
+  };
+  const originalFetch = globalThis.fetch;
+  let requestBody;
+  try {
+    globalThis.fetch = async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ updatedRange: "Sheet1!A7:I7" }) };
+    };
+    const result = await client.updateTaskIfStatus(7, {
+      id: 42,
+      status: "IN PROGRESS",
+      updatedAt: "new-updated",
+    }, "TODO");
+    assert.equal(result.updated, true);
+    assert.equal(requestBody.values[0][5], "IN PROGRESS");
+    assert.equal(requestBody.values[0][8], "creator@example.com");
+
+    currentStatus = "DONE";
+    requestBody = null;
+    const unchanged = await client.updateTaskIfStatus(7, {
+      id: 42,
+      status: "IN PROGRESS",
+      updatedAt: "must-not-write",
+    }, "TODO");
+    assert.equal(unchanged.updated, false);
+    assert.equal(unchanged.task.status, "DONE");
+    assert.equal(requestBody, null);
   } finally {
     globalThis.fetch = originalFetch;
   }

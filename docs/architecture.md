@@ -14,8 +14,11 @@ flowchart TD
   SESSION --> CARD[SeaTalk interactive card via SeaTalkClient]
   CARD -->|Confirm click| CONF[confirmTask]
   CONF --> GS[GoogleSheetsClient]
-  GS -->|append/update| SHEET[Google Sheets]
-  CONF -->|after successful write| PIC[SeaTalk single-chat PIC notice]
+  GS -->|append TODO row| SHEET[Google Sheets]
+  CONF -->|assignment card| PIC[SeaTalk PIC card]
+  PIC -->|task:ack:id| ACK[handleTaskAcknowledgement]
+  ACK -->|re-read and update status| GS
+  ACK -->|replace card| PIC
   CONF -->|card update| CARD
   WH --> STORE[messages, processing state]
   STORE --> SSE["GET /api/stream SSE"]
@@ -38,6 +41,7 @@ README/source mismatch in [gotchas](gotchas.md).
 | src/thread-sessions.js | No project modules | Pure session/task/clarification model and message-based routing |
 | src/confirmation-auth.js | No project modules | Identity normalization and authorization predicates |
 | src/confirmation-routing.js | No project modules | Parses callback button values into actions |
+| src/task-acknowledgement.js | confirmation-auth.js, seatalk.js | Re-reads Sheet rows and applies a fail-closed PIC acknowledgement |
 | src/sheet-task-updates.js | No project modules | Update intent, status parsing, row mapping and fuzzy matching |
 
 The direction is server.js → independent domain modules. google-sheets.js also imports the
@@ -48,6 +52,8 @@ Google Sheet rows use columns A:I. Column I stores the task creator's lowercase 
 survives server restarts and participates in written-task edit authorization. Add the `Creator`
 header manually in I1 of the live sheet; the application does not write headers. The PIC or
 Creator can edit Priority, Deadline, and Status on a written task.
+New tasks start as TODO. The PIC assignment card does not change that value; the PIC-only
+acknowledgement handler re-reads the row and changes TODO to IN PROGRESS with a fresh UpdatedAt.
 
 ## Process-local state
 

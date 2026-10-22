@@ -17,7 +17,7 @@ touches all three status groups.
 
 No task extraction status is created for verification events.
 
-## 2. New task → card → Confirm → Sheet → PIC
+## 2. New task → card → Confirm → Sheet → PIC acknowledgement
 
 1. parseSeaTalkEvent normalizes a supported message event. shouldProcessMessage accepts it;
    processTask gets a thread session and calls resolveTaskRoute. An empty session routes new.
@@ -35,11 +35,19 @@ No task extraction status is created for verification events.
    A disabled write flag gives paused/blocked; missing configuration or authorization gives
    not_configured/auth_required and blocked. These branches do not write a row.
 6. On success, sheet.status moves to writing then written; confirmation.status moves to
-   writing then confirmed. GoogleSheetsClient.appendTask allocates the Sheet Task ID and row.
-   sendTaskAssignmentNotification DMs the PIC, and updateConfirmationCardAfterConfirm replaces
-   the card with its completed shape. Notification/card update failures are kept in
+   writing then confirmed. GoogleSheetsClient.appendTask allocates the Sheet Task ID and a row
+   whose default status is TODO. sendTaskAssignmentNotification sends the PIC an interactive
+   card with task:ack:<sheetTaskId>; updateConfirmationCardAfterConfirm replaces the creator's
+   confirmation card with its completed shape. Card send/update failures are kept in
    confirmation.error after the Sheet write succeeds. Sheet write failure sets sheet/confirmation
    to failed.
+7. The PIC card's button is a separate acknowledgement. handleTaskAcknowledgement re-reads the
+   Sheet row by ID, requires the clicker's email to equal that row's PIC email, and checks the
+   write flag plus Sheets configuration and authorization. Only TODO changes to IN PROGRESS;
+   the write refreshes UpdatedAt and preserves all other columns. A repeated click or a row already
+   in IN PROGRESS, DONE, or NOT DO does not write or downgrade the row. The card is replaced by a
+   no-button state and the outcome is recorded with updateProcessing. Re-reading the row lets this
+   work after a server restart.
 
 The current source sends the interactive card to the source target; it does not implement the
 README-described DM-card plus thread-text fallback. See [gotchas](gotchas.md).
@@ -136,6 +144,7 @@ builder can still parse if their shape is valid; handlers may validate them furt
 |---|---|---|
 | task:confirm:<draftId> | confirm | confirmTask |
 | task:confirmed:<draftId> | confirmed | Display-only completed card; no callback handler |
+| task:ack:<sheetTaskId> | task_ack | acknowledgeTask; reads and updates the PIC's Sheet row |
 | task:priority:<draftId>:P0\|P1\|P2 | priority | updateDraftFieldAndRedraw |
 | task:deadline:<draftId>:<value> | deadline | updateDraftFieldAndRedraw; resolveDeadlineQuickPick accepts today, tomorrow, weekend, +7d |
 | task:clarify:<clarifyId>:new | clarify_new | handleClarification |

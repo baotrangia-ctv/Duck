@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, EXTRACTION_PROMPT, normalizeDeadline, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
+import { createTaskExtractor, deadlineFromPriority, extractLabeledFields, extractPayloadHints, EXTRACTION_PROMPT, normalizeDeadline, normalizeStatus, parseTaskFields, priorityFromIsoDeadline } from "../src/task-extractor.js";
 import { GoogleSheetsClient, buildTaskRow } from "../src/google-sheets.js";
-import { isConfirmationClickAuthorized } from "../src/confirmation-auth.js";
+import { isConfirmationClickAuthorized, isTaskAcknowledgementAuthorized } from "../src/confirmation-auth.js";
 import {
   SeaTalkClient,
   buildConfirmationMessage,
   buildConfirmedMessage,
   buildTaskAssignmentMessage,
+  buildTaskAcknowledgedMessage,
   getDeadlineQuickPickOptions,
 } from "../src/seatalk.js";
 import { parseConfirmationButtonValue } from "../src/confirmation-routing.js";
@@ -35,6 +36,12 @@ test("parseTaskFields accepts markdown fences and Vietnamese field names", () =>
   });
 });
 
+test("status normalization accepts TODO and TO DO", () => {
+  assert.equal(normalizeStatus("TODO"), "TODO");
+  assert.equal(normalizeStatus("TO DO"), "TODO");
+  assert.equal(parseTaskFields('{"task":"Update","status":"TO DO"}').status, "TODO");
+});
+
 test("parseTaskFields resolves deadline_expression before the model deadline", () => {
   const result = parseTaskFields(
     '{"task":"Document hướng dẫn deploy web","deadline_expression":"6h chiều nay","deadline":"29/10/2026"}',
@@ -47,6 +54,8 @@ test("parseTaskFields resolves deadline_expression before the model deadline", (
 test("LLM prompt includes the deadline expression schema, calibrated examples, and calendar", async () => {
   assert.match(EXTRACTION_PROMPT, /"deadline_expression"/);
   assert.match(EXTRACTION_PROMPT, /"priority_reason"/);
+  assert.match(EXTRACTION_PROMPT, /"TODO" \| "IN PROGRESS" \| "DONE" \| "NOT DO"/);
+  assert.match(EXTRACTION_PROMPT, /message không nêu trạng thái, trả "TODO" hoặc null/);
   assert.match(EXTRACTION_PROMPT, /@bot @userA 6h chiều nay document/);
   assert.match(EXTRACTION_PROMPT, /26\/10\/2026/);
   assert.match(EXTRACTION_PROMPT, /31\/10\/2026/);
@@ -103,7 +112,7 @@ test("rules provider keeps the message as task content without inventing fields"
     deadline: "25/09/2026",
     taskContent: "Cập nhật dashboard",
     priority: "P2",
-    status: "IN PROGRESS",
+    status: "TODO",
     source: "rules",
   });
 });
@@ -112,6 +121,7 @@ test("priority defaults to P2 when no deadline is available", async () => {
   const extractor = createTaskExtractor({ provider: "rules" });
   const result = await extractor.extract("Cập nhật tài liệu hướng dẫn", { event_type: "message" });
   assert.equal(result.priority, "P2");
+  assert.equal(result.status, "TODO");
   assert.match(result.deadline, /^\d{2}\/\d{2}\/\d{4}$/);
 });
 
@@ -137,7 +147,7 @@ test("rules provider cleans the original deadline extraction case", async () => 
     deadline: "22/10/2026",
     taskContent: "Document hướng dẫn deploy web",
     priority: "P0",
-    status: "IN PROGRESS",
+    status: "TODO",
     source: "rules",
   });
 });
@@ -229,9 +239,49 @@ test("mock LLM resolves the original case from deadline_expression when deadline
       deadline: "22/10/2026",
       taskContent: "Document hướng dẫn deploy web",
       priority: "P0",
-      status: "IN PROGRESS",
+      status: "TODO",
       source: "compass",
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("LLM status is used only when the message explicitly names a status", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({
+      task: "Cập nhật tài liệu hướng dẫn",
+      status: "IN PROGRESS",
+    }) } }] }),
+  });
+
+  try {
+    const extractor = createTaskExtractor({
+      provider: "compass",
+      compassApiKey: "mock-key",
+      referenceDate: "2026-10-22",
+    });
+    const task = await extractor.extract("Cập nhật tài liệu hướng dẫn", { event_type: "message" });
+    assert.equal(task.status, "TODO");
+
+    const revision = await extractor.extract("đổi deadline sang 30/09/2026", { event_type: "message" }, {
+      context: {
+        fields: {
+          pic: "an@example.com",
+          taskContent: "Cập nhật dashboard",
+          deadline: "25/09/2026",
+          priority: "P2",
+          status: "DONE",
+        },
+      },
+    });
+    assert.equal(revision.status, "DONE");
+
+    const explicit = await extractor.extract("Cập nhật tài liệu hướng dẫn, status: IN PROGRESS", { event_type: "message" });
+    assert.equal(explicit.status, "IN PROGRESS");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -512,6 +562,7 @@ test("task row follows the Google Sheet A-I contract", () => {
     "2026-09-19T08:00:00.000Z",
     "creator@example.com",
   ]]);
+  assert.equal(buildTaskRow({ task: "New task" })[0][5], "TODO");
 });
 
 test("Google Sheets client accepts a spreadsheet URL as the ID", () => {
@@ -735,6 +786,9 @@ test("SeaTalk client updates an interactive message in place", async () => {
 });
 
 test("confirmation button routing separates confirm, priority, and deadline actions", () => {
+  assert.deepEqual(parseConfirmationButtonValue("task:ack:42"), { kind: "task_ack", taskId: 42 });
+  assert.equal(parseConfirmationButtonValue("task:ack:abc"), null);
+  assert.equal(parseConfirmationButtonValue("task:ack:42:extra"), null);
   assert.deepEqual(parseConfirmationButtonValue("task:confirm:draft-1"), {
     kind: "confirm",
     draftId: "draft-1",
@@ -781,8 +835,31 @@ test("confirmation authorization allows the creator, rejects another identity, a
   } }, creator), true);
 });
 
-test("SeaTalk builds a direct PIC assignment notification", () => {
+test("task acknowledgement authorization is fail-closed and PIC-only", () => {
+  const row = { pic: "pic@example.com", creator: "creator@example.com" };
+  assert.equal(isTaskAcknowledgementAuthorized({ parsed: { email: "pic@example.com" } }, row), true);
+  assert.equal(isTaskAcknowledgementAuthorized({ parsed: { email: "creator@example.com" } }, row), false);
+  assert.equal(isTaskAcknowledgementAuthorized({ parsed: { email: "other@example.com" } }, row), false);
+  assert.equal(isTaskAcknowledgementAuthorized({ parsed: {} }, row), false);
+  assert.equal(isTaskAcknowledgementAuthorized({ parsed: { email: "pic@example.com" } }, { pic: "" }), false);
+});
+
+test("SeaTalk sends a TODO assignment card and replaces it with an acknowledged card", async () => {
   const message = buildTaskAssignmentMessage({
+    taskId: 42,
+    task: "Cập nhật dashboard",
+    pic: "an@example.com",
+    deadline: "30/09/2026",
+    priority: "P1",
+  });
+
+  assert.equal(message.tag, "interactive_message");
+  assert.match(message.interactive_message.elements[1].description.text, /Sheet Task ID:\*\* #42/);
+  assert.match(message.interactive_message.elements[1].description.text, /Status:\*\* TODO/);
+  assert.equal(message.interactive_message.elements[2].button.text, "Xác nhận nhận task");
+  assert.equal(message.interactive_message.elements[2].button.value, "task:ack:42");
+
+  const acknowledged = buildTaskAcknowledgedMessage({
     taskId: 42,
     task: "Cập nhật dashboard",
     pic: "an@example.com",
@@ -790,13 +867,17 @@ test("SeaTalk builds a direct PIC assignment notification", () => {
     priority: "P1",
     status: "IN PROGRESS",
   });
+  assert.equal(acknowledged.interactive_message.elements[0].title.text, "✅ Đã nhận task");
+  assert.equal(acknowledged.interactive_message.elements.length, 2);
 
-  assert.equal(message.tag, "text");
-  assert.match(message.text.content, /Task đã được xác nhận và ghi nhận/);
-  assert.match(message.text.content, /Sheet Task ID: #42/);
-  assert.match(message.text.content, /PIC: an@example.com/);
-  assert.match(message.text.content, /Nội dung Task: Cập nhật dashboard/);
-  assert.match(message.text.content, /Deadline: 30\/09\/2026/);
-  assert.match(message.text.content, /Priority: P1/);
-  assert.match(message.text.content, /Status: IN PROGRESS/);
+  const requests = [];
+  const client = new SeaTalkClient({
+    accessToken: "access-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ code: 0, message_id: "assignment-card" }) };
+    },
+  });
+  await client.sendSingleChat("pic-code", message);
+  assert.equal(JSON.parse(requests[0].options.body).message.tag, "interactive_message");
 });

@@ -16,7 +16,7 @@ Mục tiêu: đọc message text cùng payload SeaTalk, sau đó trả về DUY 
   "deadline": "DD/MM/YYYY" | null,
   "priority": "P0" | "P1" | "P2" | null,
   "priority_reason": "explicit_label" | "urgency_word" | "from_deadline" | "default" | null,
-  "status": "IN PROGRESS" | "DONE" | "NOT DO" | null
+  "status": "TODO" | "IN PROGRESS" | "DONE" | "NOT DO" | null
 }
 
 Quy tắc trích xuất:
@@ -27,25 +27,28 @@ ${DEADLINE_POLICY}
 - Mọi cụm thời gian gắn với công việc là deadline dù không có từ "deadline". Trả deadline_expression nguyên văn; không tự cộng ngày hoặc tính thứ nếu expression đã đủ để code resolve.
 - priority phải được suy ra từ deadline đã resolve khi không có nhãn Priority hoặc từ ngữ khẩn cấp rõ ràng. Không để priority null khi có deadline.
 - task là mệnh đề công việc đã làm sạch: bỏ mention, cụm thời gian, từ routing/giao việc thừa, đại từ/kính ngữ ("cho anh", "giúp em", "nhờ bạn") và particle cuối câu ("nhé", "nha", "ạ", "với"). Giữ thuật ngữ gốc như document, deploy, web; viết hoa chữ đầu.
-- status chỉ nhận đúng một trong ba giá trị "IN PROGRESS", "DONE", "NOT DO". Chỉ chọn DONE hoặc NOT DO khi message nói rõ task đã hoàn thành hoặc không thực hiện; trường hợp còn lại trả "IN PROGRESS" hoặc null để server áp dụng mặc định.
+- status chỉ nhận đúng một trong bốn giá trị "TODO", "IN PROGRESS", "DONE", "NOT DO". Chỉ chọn một trạng thái được message nói rõ; không suy ra IN PROGRESS chỉ vì message đang giao task. Nếu message không nêu trạng thái, trả "TODO" hoặc null để server áp dụng mặc định.
 - PIC, deadline và task là ba field bắt buộc trước khi ghi Google Sheet. Nếu thiếu bất kỳ field nào thì vẫn trả JSON nhưng để field đó là null; server sẽ không ghi dòng thiếu dữ liệu.
 - Không biến lời chào, câu hỏi hướng dẫn hoặc sự kiện không phải giao việc thành task.
 - Không hỏi thêm, không xác nhận tạo task, không gọi Tao_cong_viec và không thêm field ngoài schema.
 ${TASK_PRIORITY_POLICY}
 
 Ví dụ few-shot dưới đây đều dùng reference date 2026-10-22 (Thứ Năm):
-| Message | deadline_expression | deadline | priority | priority_reason | task |
-|---|---|---|---|---|---|
-| @bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé | 6h chiều nay | 22/10/2026 | P0 | from_deadline | Document hướng dẫn deploy web |
-| @userA fix bug login trước 9h sáng mai | trước 9h sáng mai | 23/10/2026 | P0 | from_deadline | Fix bug login |
-| @userA làm report doanh thu thứ 6 này | thứ 6 này | 23/10/2026 | P0 | from_deadline | Làm report doanh thu |
-| @userA review PR thứ 2 tuần sau | thứ 2 tuần sau | 26/10/2026 | P2 | from_deadline | Review PR |
-| @userA update dashboard trong tuần này | trong tuần này | 23/10/2026 | P0 | from_deadline | Update dashboard |
-| @userA gấp! sửa crash client | null | 22/10/2026 | P0 | urgency_word | Sửa crash client |
-| @userA viết tài liệu API, không gấp | null | 29/10/2026 | P2 | urgency_word | Viết tài liệu API |
-| @userA test build 25/10 | 25/10 | 25/10/2026 | P1 | from_deadline | Test build |
-| @userA deploy staging 3 ngày nữa | 3 ngày nữa | 25/10/2026 | P1 | from_deadline | Deploy staging |
-| @userA báo cáo cuối tháng, priority P1 | cuối tháng | 31/10/2026 | P1 | explicit_label | Báo cáo |
+| Message | deadline_expression | deadline | priority | priority_reason | task | status |
+|---|---|---|---|---|---|---|
+| @bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé | 6h chiều nay | 22/10/2026 | P0 | from_deadline | Document hướng dẫn deploy web | TODO |
+| @userA fix bug login trước 9h sáng mai | trước 9h sáng mai | 23/10/2026 | P0 | from_deadline | Fix bug login | TODO |
+| @userA làm report doanh thu thứ 6 này | thứ 6 này | 23/10/2026 | P0 | from_deadline | Làm report doanh thu | TODO |
+| @userA review PR thứ 2 tuần sau | thứ 2 tuần sau | 26/10/2026 | P2 | from_deadline | Review PR | TODO |
+| @userA update dashboard trong tuần này | trong tuần này | 23/10/2026 | P0 | from_deadline | Update dashboard | TODO |
+| @userA gấp! sửa crash client | null | 22/10/2026 | P0 | urgency_word | Sửa crash client | TODO |
+| @userA viết tài liệu API, không gấp | null | 29/10/2026 | P2 | urgency_word | Viết tài liệu API | TODO |
+| @userA test build 25/10 | 25/10 | 25/10/2026 | P1 | from_deadline | Test build | TODO |
+| @userA deploy staging 3 ngày nữa | 3 ngày nữa | 25/10/2026 | P1 | from_deadline | Deploy staging | TODO |
+| @userA báo cáo cuối tháng, priority P1 | cuối tháng | 31/10/2026 | P1 | explicit_label | Báo cáo | TODO |
+| @userA làm task review onboarding, status: IN PROGRESS | null | 29/10/2026 | P2 | default | Review onboarding | IN PROGRESS |
+| @userA task review onboarding đã hoàn thành | null | 29/10/2026 | P2 | default | Review onboarding | DONE |
+| @userA task review onboarding không thực hiện | null | 29/10/2026 | P2 | default | Review onboarding | NOT DO |
 
 Không trả markdown, giải thích, câu hỏi hoặc JSON lồng trong code fence.`;
 
@@ -77,6 +80,7 @@ function normalizeStatus(value) {
   const text = asText(value);
   if (!text) return null;
   const normalized = text.toUpperCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (normalized === "TODO" || normalized === "TO DO") return "TODO";
   if (normalized === "DONE") return "DONE";
   if (normalized === "NOT DO" || normalized === "NOT DONE") return "NOT DO";
   if (normalized === "IN PROGRESS" || normalized === "INPROGRESS") return "IN PROGRESS";
@@ -616,7 +620,7 @@ function hasExplicitPicSignal(text, payload) {
 }
 
 function hasExplicitStatusSignal(text) {
-  return /\b(?:status|trạng thái|done|hoàn thành|đã xong|not do|không làm|in progress|đang làm)\b/i.test(String(text || "").normalize("NFC"));
+  return /\b(?:status|trạng thái|todo|to do|done|not do|not done|hoàn thành|đã xong|không làm|không thực hiện|in progress|đang làm|đang thực hiện|chưa xong)\b/i.test(String(text || "").normalize("NFC"));
 }
 
 function revisionSignals(text, payload) {
@@ -655,6 +659,10 @@ function mergeRevisionFields(fields, context, text, payload) {
   return mergeFields(updates, previous);
 }
 
+function fieldsWithExplicitStatus(fields, text) {
+  return hasExplicitStatusSignal(text) ? fields : { ...fields, status: null };
+}
+
 function contextInstructions(context) {
   const previous = contextFields(context);
   if (!previous) return "";
@@ -677,7 +685,7 @@ function finalizeFields(fields, referenceDate, holidayDates) {
     ...fields,
     deadline,
     priority: explicitPriority || priorityFromIsoDeadline(deadlineToIso(deadline), referenceDate) || "P2",
-    status: normalizeStatus(fields.status) || "IN PROGRESS",
+    status: normalizeStatus(fields.status) || "TODO",
   };
 }
 
@@ -788,7 +796,7 @@ function createTaskExtractor({
 
     if (activeProvider === "rules") {
       const fields = mergeFields(payloadHints, mergeFields(fallback, { pic: null, deadline: null, taskContent: text, priority: inferredPriority, status: null }));
-      const finalized = finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates);
+      const finalized = finalizeFields(mergeRevisionFields(fieldsWithExplicitStatus(fields, text), context, text, payload), extractionReferenceDate, holidayDates);
       return {
         ...finalized,
         taskContent: cleanTaskContent(finalized.taskContent, {
@@ -822,7 +830,7 @@ function createTaskExtractor({
         deadline: deadlineFromPriority(inferredPriority, extractionReferenceDate),
       };
     }
-    const finalized = finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates);
+    const finalized = finalizeFields(mergeRevisionFields(fieldsWithExplicitStatus(fields, text), context, text, payload), extractionReferenceDate, holidayDates);
     const parsedDeadlineDetails = parsed.deadlineExpression
       ? extractDeadlineText(parsed.deadlineExpression, extractionReferenceDate, holidayDates)
       : null;

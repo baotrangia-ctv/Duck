@@ -40,6 +40,7 @@
 | [../src/thread-sessions.js](../src/thread-sessions.js) | Thread tasks and clarification routing | createThreadSession, resolveTaskRoute, reopenTaskForConfirmation | Changing thread task behavior |
 | [../src/confirmation-auth.js](../src/confirmation-auth.js) | Creator, PIC, and clicker authorization | isConfirmationClickAuthorized, isTaskMessageUpdateAuthorized | Changing permissions |
 | [../src/confirmation-routing.js](../src/confirmation-routing.js) | SeaTalk callback value parser | parseConfirmationButtonValue | Changing interactive buttons |
+| [../src/task-acknowledgement.js](../src/task-acknowledgement.js) | PIC-only Sheet-backed task acknowledgement | handleTaskAcknowledgement | Changing the TODO → IN PROGRESS flow |
 | [../src/sheet-task-updates.js](../src/sheet-task-updates.js) | Natural-language intent and row conversion/matching | detectTaskIntent, extractRequestedStatus, findMatchingSheetTasks | Changing Phase 2 update parsing |
 | [../rules/PIC_POLICY.md](../rules/PIC_POLICY.md) | PIC policy injected into the extraction prompt | — | Changing assignment interpretation |
 | [../rules/DEADLINE_POLICY.md](../rules/DEADLINE_POLICY.md) | Deadline policy injected into the extraction prompt | — | Changing date interpretation |

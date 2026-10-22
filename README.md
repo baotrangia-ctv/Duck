@@ -38,14 +38,16 @@ Khi nhận `message_from_bot_subscriber` (hoặc event message tương đương)
 | C | PIC — email người được giao |
 | D | Deadline — định dạng `DD/MM/YYYY` |
 | E | Priority — theo `TaskPriorityPolicy` hiện tại |
-| F | Status — `IN PROGRESS`, `DONE` hoặc `NOT DO`; mặc định `IN PROGRESS` |
+| F | Status — `TODO`, `IN PROGRESS`, `DONE` hoặc `NOT DO`; mặc định `TODO` |
 | G | CreatedAt — thời điểm nhận/xác nhận task |
 | H | UpdatedAt — mặc định bằng `CreatedAt` |
 | I | Creator — email viết thường của người tạo task |
 
 Thêm thủ công header `Creator` vào ô I1 của Google Sheet đang dùng. Server không ghi header.
 
-Sau khi extract trong group chat, bot gửi phần nội dung PIC, Nội dung Task, Deadline, Priority vào thread gốc và gửi interactive card có nút **Confirm** vào chat riêng của người tạo task. SeaTalk group-chat API hiện không nhận `interactive_message`, nên đây là cách giữ được cả thread context và nút Confirm. Nếu không gửi được chat riêng, người dùng có thể reply `Confirm` trong thread. Chỉ khi Confirm thì task mới được ghi vào Google Sheet; sau khi ghi thành công, bot gửi thông tin task trực tiếp tới PIC thay vì phản hồi thành công vào group chat. ID được tính bằng `max(ID hiện có) + 1`; các lần ghi được serialize để tránh cấp trùng ID khi có nhiều event đồng thời.
+Sau khi extract trong group chat, bot gửi phần nội dung PIC, Nội dung Task, Deadline, Priority vào thread gốc và gửi interactive card có nút **Confirm** vào chat riêng của người tạo task. SeaTalk group-chat API hiện không nhận `interactive_message`, nên đây là cách giữ được cả thread context và nút Confirm. Nếu không gửi được chat riêng, người dùng có thể reply `Confirm` trong thread. Chỉ khi Confirm thì task mới được ghi vào Google Sheet; sau khi ghi thành công, bot gửi interactive card giao task trực tiếp tới PIC. ID được tính bằng `max(ID hiện có) + 1`; các lần ghi được serialize để tránh cấp trùng ID khi có nhiều event đồng thời.
+
+Task mới có trạng thái `TODO` trong draft, card xác nhận, Sheet và card giao việc gửi cho PIC. Việc nhận DM không đổi trạng thái. PIC bấm **Xác nhận nhận task** để đổi Sheet sang `IN PROGRESS`; Creator không thể bấm thay PIC trừ khi họ cũng là PIC. Nút acknowledgement đọc lại dòng Sheet nên vẫn xử lý được sau khi server khởi động lại. Nếu task đã có trạng thái khác `TODO`, server giữ nguyên trạng thái đó.
 
 Nếu người dùng tiếp tục @mention bot trong cùng thread, extractor nhận draft và lịch sử gần đây làm context, chỉ cập nhật các field được yêu cầu rồi gửi lại card Confirm. Nếu task đã được ghi, lần Confirm sau sẽ update đúng dòng cũ trong Google Sheet thay vì tạo dòng mới. Callback `interactive_message_click` được xử lý riêng, không bị extract thành task mới.
 

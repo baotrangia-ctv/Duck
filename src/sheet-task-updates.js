@@ -9,7 +9,7 @@ function normalizeSearchText(value) {
     .trim();
 }
 
-const UPDATE_FIELD_PATTERN = /\b(?:priority|uu tien|muc do uu tien|do uu tien|p0|p1|p2|deadline|han(?: chot| hoan thanh)?|due date|status|trang thai|done|not do|not done|in progress|hoan thanh|da xong|dang lam|dang thuc hien|chua xong)\b/i;
+const UPDATE_FIELD_PATTERN = /\b(?:priority|uu tien|muc do uu tien|do uu tien|p0|p1|p2|deadline|han(?: chot| hoan thanh)?|due date|status|trang thai|todo|to do|done|not do|not done|in progress|hoan thanh|da xong|dang lam|dang thuc hien|chua xong)\b/i;
 const UNSUPPORTED_FIELD_PATTERN = /\b(?:pic|nguoi phu trach|phu trach|giao cho)\b/i;
 const UPDATE_VERB_PATTERN = /\b(?:doi|sua|update|cap nhat|chinh|thay|change|set)\b/i;
 
@@ -58,7 +58,7 @@ function detectTaskIntent(text) {
     fields: {
       priority: /\b(?:priority|uu tien|muc do uu tien|do uu tien|p0|p1|p2)\b/i.test(value),
       deadline: /\b(?:deadline|han(?: chot| hoan thanh)?|due date)\b/i.test(value),
-      status: /\b(?:status|trang thai|done|not do|not done|in progress|hoan thanh|da xong|dang lam|dang thuc hien|chua xong)\b/i.test(value),
+      status: /\b(?:status|trang thai|todo|to do|done|not do|not done|in progress|hoan thanh|da xong|dang lam|dang thuc hien|chua xong)\b/i.test(value),
     },
   };
 }
@@ -67,6 +67,7 @@ function extractRequestedStatus(text) {
   const value = normalizeSearchText(text);
   if (/\b(?:not do|not done|khong lam|huy|cancel(?:led)?)\b/i.test(value)) return "NOT DO";
   if (/\b(?:done|hoan thanh|da xong|completed?|finished?)\b/i.test(value)) return "DONE";
+  if (/\b(?:todo|to do)\b/i.test(value)) return "TODO";
   if (/\b(?:in progress|dang lam|dang thuc hien|chua xong)\b/i.test(value)) return "IN PROGRESS";
   return null;
 }
@@ -91,7 +92,7 @@ function sheetRowToTask(row, rowNumber) {
     pic: String(row[2] ?? "").trim(),
     deadline: String(row[3] ?? "").trim(),
     priority: String(row[4] ?? "").trim(),
-    status: String(row[5] ?? "").trim() || "IN PROGRESS",
+    status: String(row[5] ?? "").trim() || "TODO",
     createdAt: String(row[6] ?? "").trim(),
     updatedAt: String(row[7] ?? "").trim(),
     creator: String(row[8] ?? "").trim(),

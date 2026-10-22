@@ -16,6 +16,7 @@ compares fixture expectations for deadline, priority, and task.
 | File | Coverage |
 |---|---|
 | test/task-extractor.test.js | JSON parsing, prompt, deterministic and mocked LLM extraction, deadlines, priorities, revisions, card builders, SeaTalk calls and auth |
+| test/task-acknowledgement.test.js | PIC-only acknowledgement, Sheet re-read/write, UpdatedAt, idempotence, final statuses, and card update |
 | test/sheet-task-updates.test.js | Update-intent/status parsing, A:I row conversion and Creator preservation, Sheet client lookup, update cards, PIC/Creator authorization and PIC notification routing |
 | test/thread-sessions.test.js | Session/task routing, quoted messages, clarification choices, five-task limit, short IDs, reopening |
 | test/fixtures/extraction-cases.json | 46 input messages with deadline, priority, and task expectations |

@@ -1,5 +1,8 @@
 function parseConfirmationButtonValue(buttonValue) {
   const value = String(buttonValue || "").trim();
+  const taskAckMatch = value.match(/^task:ack:(\d+)$/);
+  if (taskAckMatch) return { kind: "task_ack", taskId: Number(taskAckMatch[1]) };
+
   const sheetUpdateMatch = value.match(/^task:sheet-update:(confirm|updated|priority|deadline):([^:]+)(?::(.+))?$/);
   if (sheetUpdateMatch) {
     const [, action, updateId, fieldValue] = sheetUpdateMatch;

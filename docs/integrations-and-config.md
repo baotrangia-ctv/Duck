@@ -88,7 +88,7 @@ deployed SeaTalk app before relying on the README flow; see [gotchas](gotchas.md
 | C | PIC | Email |
 | D | Deadline | DD/MM/YYYY |
 | E | Priority | P0/P1/P2 |
-| F | Status | IN PROGRESS, DONE, or NOT DO |
+| F | Status | TODO, IN PROGRESS, DONE, or NOT DO; new tasks default to TODO |
 | G | CreatedAt | ISO timestamp |
 | H | UpdatedAt | ISO timestamp; defaults to CreatedAt |
 | I | Creator | Lowercase email of the task creator; may be empty when SeaTalk supplies no email |
@@ -101,6 +101,11 @@ GoogleSheetsClient instance; it is not a distributed lock for multiple server in
 For written tasks, the PIC or the Creator may edit Priority, Deadline, and Status. The Sheet
 row's Creator value is authoritative for ID-based and card updates; an empty Creator cell leaves
 edit permission with the PIC only. A Creator's card-confirmation DM is routed to the PIC.
+
+New tasks remain TODO after the PIC receives their assignment card. Only the PIC email stored in
+column C may acknowledge the card; the Creator cannot acknowledge unless they are also the PIC.
+Acknowledgement re-reads the row and changes TODO to IN PROGRESS, refreshing UpdatedAt. Repeated
+clicks and rows already in IN PROGRESS, DONE, or NOT DO do not change the Sheet row.
 
 OAuth requests spreadsheet, openid, email, and profile scopes. The token file defaults to
 .oauth/google-token.json, is written with mode 0600, and is deleted by disconnect. Keep it

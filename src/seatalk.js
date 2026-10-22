@@ -76,6 +76,7 @@ function buildConfirmationMessage(draft, confirmationValue) {
     `**Nội dung Task:** ${fieldValue(draft.task)}`,
     `**Deadline:** ${deadline}`,
     `**Priority:** ${fieldValue(draft.priority)}`,
+    `**Status:** ${fieldValue(draft.status || "TODO")}`,
   ].filter(Boolean).join("\n");
 
   return {
@@ -124,6 +125,7 @@ function buildConfirmedMessage(draft, draftId) {
     `**Nội dung Task:** ${fieldValue(draft.task)}`,
     `**Deadline:** ${fieldValue(draft.deadline)}`,
     `**Priority:** ${fieldValue(draft.priority)}`,
+    `**Status:** ${fieldValue(draft.status || "TODO")}`,
   ].filter(Boolean).join("\n");
 
   return {
@@ -205,7 +207,7 @@ function buildSheetTaskUpdateDescription(draft) {
     `**Nội dung Task:** ${fieldValue(draft.task)}`,
     `**Deadline:** ${fieldValue(draft.deadline)}`,
     `**Priority:** ${fieldValue(draft.priority)}`,
-    `**Status:** ${fieldValue(draft.status || "IN PROGRESS")}`,
+    `**Status:** ${fieldValue(draft.status || "TODO")}`,
   ].join("\n");
 }
 
@@ -271,6 +273,7 @@ function buildConfirmationText(draft) {
     `Nội dung Task: ${fieldValue(draft.task)}`,
     `Deadline: ${fieldValue(draft.deadline)}`,
     `Priority: ${fieldValue(draft.priority)}`,
+    `Status: ${fieldValue(draft.status || "TODO")}`,
   ].join("\n");
   return {
     tag: "text",
@@ -278,19 +281,52 @@ function buildConfirmationText(draft) {
   };
 }
 
-function buildTaskAssignmentMessage(draft) {
-  const content = [
-    "Task đã được xác nhận và ghi nhận:",
-    ...(draft.taskId !== null && draft.taskId !== undefined ? [`Sheet Task ID: #${fieldValue(draft.taskId)}`] : []),
-    `PIC: ${fieldValue(draft.pic)}`,
-    `Nội dung Task: ${fieldValue(draft.task)}`,
-    `Deadline: ${fieldValue(draft.deadline)}`,
-    `Priority: ${fieldValue(draft.priority)}`,
-    `Status: ${fieldValue(draft.status || "IN PROGRESS")}`,
+function buildTaskAssignmentDescription(draft) {
+  const taskId = draft.taskId ?? draft.id;
+  return [
+    ...(taskId !== null && taskId !== undefined ? [`**Sheet Task ID:** #${fieldValue(taskId)}`] : []),
+    `**PIC:** ${fieldValue(draft.pic)}`,
+    `**Nội dung Task:** ${fieldValue(draft.task)}`,
+    `**Deadline:** ${fieldValue(draft.deadline)}`,
+    `**Priority:** ${fieldValue(draft.priority)}`,
+    `**Status:** ${fieldValue(draft.status || "TODO")}`,
   ].join("\n");
+}
+
+function buildTaskAssignmentMessage(draft) {
+  const taskId = draft.taskId ?? draft.id;
   return {
-    tag: "text",
-    text: { format: "2", content },
+    tag: "interactive_message",
+    interactive_message: {
+      elements: [
+        { element_type: "title", title: { text: "Task mới được giao" } },
+        { element_type: "description", description: { format: 1, text: buildTaskAssignmentDescription(draft) } },
+        {
+          element_type: "button",
+          button: {
+            button_type: "callback",
+            text: "Xác nhận nhận task",
+            value: `task:ack:${fieldValue(taskId)}`,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function buildTaskAcknowledgedMessage(draft) {
+  const status = String(draft.status || "TODO").trim().toUpperCase();
+  return {
+    tag: "interactive_message",
+    interactive_message: {
+      elements: [
+        {
+          element_type: "title",
+          title: { text: status === "IN PROGRESS" ? "✅ Đã nhận task" : `Task hiện có trạng thái: ${fieldValue(status)}` },
+        },
+        { element_type: "description", description: { format: 1, text: buildTaskAssignmentDescription(draft) } },
+      ],
+    },
   };
 }
 
@@ -302,7 +338,7 @@ function buildTaskAssignmentUpdatedMessage(draft) {
     `Nội dung Task: ${fieldValue(draft.task)}`,
     `Deadline: ${fieldValue(draft.deadline)}`,
     `Priority: ${fieldValue(draft.priority)}`,
-    `Status: ${fieldValue(draft.status || "IN PROGRESS")}`,
+    `Status: ${fieldValue(draft.status || "TODO")}`,
   ].join("\n");
   return { tag: "text", text: { format: "2", content } };
 }
@@ -414,6 +450,7 @@ export {
   buildSheetTaskUpdatedMessage,
   buildConfirmationText,
   buildTaskAssignmentMessage,
+  buildTaskAcknowledgedMessage,
   buildTaskAssignmentUpdatedMessage,
   getDeadlineQuickPickOptions,
   resolveDeadlineQuickPick,

@@ -45,6 +45,16 @@ Ordered roughly by blast radius.
 - **Where:** src/confirmation-auth.js.
 - **Do:** Preserve this distinction deliberately and test known, unknown, and mismatched identities.
 
+## PIC receipt is an explicit task acknowledgement
+
+- **What:** Sending the assignment card leaves a new task in TODO. Only a click whose email equals
+  the PIC email in the Sheet row can change TODO to IN PROGRESS.
+- **Why:** Delivery of a DM does not establish that the PIC accepted the task. The callback must
+  re-read the Sheet row so it still works after process-local task state is lost on restart.
+- **Where:** src/task-acknowledgement.js, src/confirmation-auth.js, and server.js handleWebhook.
+- **Do:** Keep the acknowledgement check fail-closed, refresh UpdatedAt only on TODO → IN PROGRESS,
+  preserve the rest of the row, and leave DONE/NOT DO/IN PROGRESS unchanged on repeated clicks.
+
 ## Sheet IDs and deduplication are process-local assumptions
 
 - **What:** nextTaskId reads max(ID)+1, then appendTask writes under appendQueue. Event

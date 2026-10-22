@@ -86,10 +86,17 @@ function isSheetUpdateClickAuthorized(clickRecord, pending) {
   return Boolean(clicker.email && expectedEmails.includes(clicker.email));
 }
 
+function isTaskAcknowledgementAuthorized(clickRecord, task) {
+  const clickerEmail = getClickerIdentity(clickRecord).email;
+  const picEmail = normalizeEmail(task?.pic);
+  return Boolean(clickerEmail && picEmail && clickerEmail === picEmail);
+}
+
 export {
   isConfirmationClickAuthorized,
   isClarificationClickAuthorized,
   isTaskMessageUpdateAuthorized,
   isSheetRowUpdateAuthorized,
   isSheetUpdateClickAuthorized,
+  isTaskAcknowledgementAuthorized,
 };

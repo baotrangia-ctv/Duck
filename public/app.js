@@ -39,7 +39,7 @@ function processingMarkup(result) {
     <div class="task-result-head"><span class="task-label">TASK EXTRACTION · ${escapeHtml(extraction.provider || "AI")}</span><span>${escapeHtml(extractionLabels[extractionStatus] || extractionStatus)}</span></div>
     <div class="task-fields">
       <div><span>ID</span><strong>${value(extraction.taskId)}</strong></div>
-      <div><span>STATUS</span><strong>${value(extraction.taskStatus || "IN PROGRESS")}</strong></div>
+      <div><span>STATUS</span><strong>${value(extraction.taskStatus || "TODO")}</strong></div>
       <div><span>PIC</span><strong>${value(extraction.pic)}</strong></div>
       <div><span>CREATOR</span><strong>${value(extraction.creator)}</strong></div>
       <div><span>DEADLINE</span><strong>${value(extraction.deadline)}</strong></div>
@@ -72,7 +72,7 @@ function renderExtractedTasks() {
       <td>${escapeHtml(extraction.creator || "—")}</td>
       <td>${escapeHtml(extraction.deadline || "—")}</td>
       <td class="priority-cell">${escapeHtml(extraction.priority || "—")}</td>
-      <td>${escapeHtml(extraction.taskStatus || "IN PROGRESS")}</td>
+      <td>${escapeHtml(extraction.taskStatus || "TODO")}</td>
       <td>${escapeHtml(formatDate(extraction.createdAt) || "—")}</td>
       <td>${escapeHtml(formatDate(extraction.updatedAt) || "—")}</td>
     </tr>`;

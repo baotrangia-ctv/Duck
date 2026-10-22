@@ -33,6 +33,7 @@ sending a confirmation card or writing a Sheet row. The default server bind is 0
 | src/thread-sessions.js | In-memory thread/task model and routing |
 | src/confirmation-auth.js | Identity checks for confirmations and updates |
 | src/confirmation-routing.js | Callback button-value parser |
+| src/task-acknowledgement.js | PIC-only, restart-safe TODO acknowledgement handler |
 | src/sheet-task-updates.js | Update intent/status parsing and row matching |
 | rules/*.md | PIC, deadline, and priority extraction policies |
 | public/ | Static dashboard; app.js consumes API and SSE events |
@@ -49,7 +50,8 @@ sending a confirmation card or writing a Sheet row. The default server bind is 0
 6. createTaskExtractor combines local rules, payload hints, and an optional Chatflow or Compass call.
 7. The task is kept in threadSessions and shown in a SeaTalk interactive confirmation card.
 8. A valid Confirm click checks identity, required fields, Sheet configuration, and OAuth.
-9. GoogleSheetsClient appends a row or updates the existing row; then the PIC receives a SeaTalk DM.
+9. GoogleSheetsClient appends a TODO row; the PIC receives an interactive DM and can acknowledge it
+   to set IN PROGRESS.
 10. Dashboard snapshots and processing changes are broadcast over /api/stream SSE.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.md).

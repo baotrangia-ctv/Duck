@@ -37,7 +37,7 @@ function buildTaskRow({ id, task, taskContent, pic, deadline, priority, status, 
     pic || "",
     deadline || "",
     priority || "",
-    status || "IN PROGRESS",
+    status || "TODO",
     createdAt || "",
     updatedAt || createdAt || "",
     String(creator || "").trim().toLowerCase(),
@@ -298,6 +298,39 @@ class GoogleSheetsClient {
     return operation;
   }
 
+  async updateTaskIfStatus(rowNumber, task, expectedStatus) {
+    const operation = this.appendQueue.then(() => this._updateTaskIfStatus(rowNumber, task, expectedStatus));
+    this.appendQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async _updateTaskIfStatus(rowNumber, task, expectedStatus) {
+    if (!this.isConfigured()) {
+      throw new Error("Google Sheets OAuth chưa được cấu hình");
+    }
+    if (!Number.isInteger(Number(rowNumber)) || Number(rowNumber) < 2) {
+      throw new Error("Không xác định được dòng task cần update trong Google Sheet");
+    }
+
+    const token = await this.getAccessToken();
+    const row = Number(rowNumber);
+    const range = `${this.sheetName}!A${row}:I${row}`;
+    const rows = await this.readValues(range, token);
+    const currentTask = sheetRowToTask(rows[0], row);
+    const taskId = task.id ?? task.taskId;
+    if (!currentTask || String(currentTask.id) !== String(taskId)) {
+      return { updated: false, notFound: true, task: currentTask, rowNumber: row };
+    }
+
+    const currentStatus = String(currentTask.status || "TODO").trim().toUpperCase().replace(/\s+/g, " ");
+    const expected = String(expectedStatus || "").trim().toUpperCase().replace(/\s+/g, " ");
+    const matchesExpected = currentStatus === expected || (expected === "TODO" && currentStatus === "TO DO");
+    if (!matchesExpected) return { updated: false, task: currentTask, rowNumber: row };
+
+    const result = await this._writeTaskRow(row, { ...currentTask, ...task }, token);
+    return { ...result, updated: true, task: { ...currentTask, ...task } };
+  }
+
   async _updateTask(rowNumber, task) {
     if (!this.isConfigured()) {
       throw new Error("Google Sheets OAuth chưa được cấu hình");
@@ -308,6 +341,10 @@ class GoogleSheetsClient {
 
     const token = await this.getAccessToken();
     const row = Number(rowNumber);
+    return this._writeTaskRow(row, task, token);
+  }
+
+  async _writeTaskRow(row, task, token) {
     const range = `${this.sheetName}!A${row}:I${row}`;
     let creator = task.creator;
     if (!String(creator || "").trim()) {
