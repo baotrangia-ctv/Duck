@@ -100,7 +100,7 @@ test("rules provider keeps the message as task content without inventing fields"
   assert.deepEqual(result, {
     pic: null,
     deadline: "25/09/2026",
-    taskContent: "cập nhật dashboard",
+    taskContent: "Cập nhật dashboard",
     priority: "P2",
     status: "IN PROGRESS",
     source: "rules",
@@ -112,6 +112,78 @@ test("priority defaults to P2 when no deadline is available", async () => {
   const result = await extractor.extract("Cập nhật tài liệu hướng dẫn", { event_type: "message" });
   assert.equal(result.priority, "P2");
   assert.match(result.deadline, /^\d{2}\/\d{2}\/\d{4}$/);
+});
+
+test("rules provider cleans the original deadline extraction case", async () => {
+  const text = "@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé";
+  const payload = {
+    event: {
+      message: {
+        text: {
+          plain_text: text,
+          mentioned_list: [
+            { username: "bot", location: 0, length: 4 },
+            { username: "userA", email: "userA@example.com", location: 5, length: 6 },
+          ],
+        },
+      },
+    },
+  };
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+  const result = await extractor.extract(text, payload);
+  assert.deepEqual(result, {
+    pic: "userA@example.com",
+    deadline: "22/10/2026",
+    taskContent: "Document hướng dẫn deploy web",
+    priority: "P0",
+    status: "IN PROGRESS",
+    source: "rules",
+  });
+});
+
+test("LLM task content takes precedence over the payload hint", async () => {
+  const text = "@bot @userA 6h chiều nay document cho anh hướng dẫn deploy web nhé";
+  const payload = {
+    event: {
+      message: {
+        text: {
+          plain_text: text,
+          mentioned_list: [
+            { username: "bot", location: 0, length: 4 },
+            { username: "userA", email: "userA@example.com", location: 5, length: 6 },
+          ],
+        },
+      },
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({
+      task: "LLM cleaned task content",
+      pic: null,
+      deadline_expression: "6h chiều nay",
+      deadline: null,
+      priority: null,
+      status: null,
+    }) } }] }),
+  });
+
+  try {
+    const extractor = createTaskExtractor({
+      provider: "compass",
+      compassApiKey: "mock-key",
+      referenceDate: "2026-10-22",
+    });
+    const result = await extractor.extract(text, payload);
+    assert.equal(result.taskContent, "LLM cleaned task content");
+    assert.equal(result.deadline, "22/10/2026");
+    assert.equal(result.priority, "P0");
+    assert.equal(result.pic, "userA@example.com");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("rules provider derives priority from deadline unless the user labels it", async () => {
@@ -160,7 +232,7 @@ test("payload hints extract the assigned email and normalize a natural Vietnames
   assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
     pic: "chung@example.com",
     deadline: "19/09/2026",
-    taskContent: "lấy snack",
+    taskContent: "Lấy snack",
     status: null,
   });
 });
@@ -281,13 +353,16 @@ test("payload hints support the actual SeaTalk event.email and text.content shap
   assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
     pic: "giabao.tran@garena.vn",
     deadline: "21/09/2026",
-    taskContent: "optimize xong client performance của SAP",
+    taskContent: "Optimize xong client performance của SAP",
     status: null,
   });
 });
 
 test("payload hints choose the mentioned assignee from the actual group-chat shape", () => {
-  const text = "@Duck_Test Hãy log task cho @Chung Anh (Lemon) 🍋 trước thứ 2 tuần sau phải optimize xong client performance của Dig";
+  const botMention = "@Duck_Test";
+  const otherMention = "@Other";
+  const assigneeMention = "@Chung Anh (Lemon) 🍋";
+  const text = `${botMention} ${otherMention} Hãy log task cho ${assigneeMention} trước thứ 2 tuần sau phải optimize xong client performance của Dig`;
   const payload = {
     event: {
       message: {
@@ -295,8 +370,9 @@ test("payload hints choose the mentioned assignee from the actual group-chat sha
         text: {
           plain_text: text,
           mentioned_list: [
-            { username: "Duck_Test", email: "", location: 0, length: 10 },
-            { username: "Chung Anh (Lemon) 🍋", email: "chunganh.nguyenthi_ctv@garena.vn", location: 29, length: 21 },
+            { username: "Duck_Test", email: "", location: text.indexOf(botMention), length: botMention.length },
+            { username: "Other", email: "other@example.com", location: text.indexOf(otherMention), length: otherMention.length },
+            { username: "Chung Anh (Lemon) 🍋", email: "chunganh.nguyenthi_ctv@garena.vn", location: text.indexOf(assigneeMention), length: assigneeMention.length },
           ],
         },
       },
@@ -305,7 +381,7 @@ test("payload hints choose the mentioned assignee from the actual group-chat sha
   assert.deepEqual(extractPayloadHints(text, payload, "2026-09-19"), {
     pic: "chunganh.nguyenthi_ctv@garena.vn",
     deadline: "21/09/2026",
-    taskContent: "Hãy log task cho phải optimize xong client performance của Dig",
+    taskContent: "Optimize xong client performance của Dig",
     status: null,
   });
 });

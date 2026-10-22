@@ -488,10 +488,52 @@ function extractExplicitTaskContent(value) {
   return cleanHintText(match?.[1]);
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function cleanTaskContent(value, { matchedDeadlineText = null, mentions = [], sourceText = value } = {}) {
+  let content = String(value || "");
+  const source = String(sourceText || "");
+  if (content === source && mentions.length) {
+    for (const mention of [...mentions].sort((a, b) => b.location - a.location)) {
+      if (Number.isInteger(mention.location) && Number.isInteger(mention.length) && mention.length > 0) {
+        content = `${content.slice(0, mention.location)}${content.slice(mention.location + mention.length)}`;
+      }
+    }
+  }
+  for (const mention of mentions) {
+    const username = asText(mention.username);
+    if (username) {
+      const token = username.startsWith("@") ? username : `@${username}`;
+      content = content.replace(new RegExp(escapeRegExp(token), "giu"), " ");
+    }
+  }
+  content = content.normalize("NFC");
+  content = content.replace(/(?<![\p{L}\p{N}])@[\p{L}\p{N}_.-]+/gu, " ");
+  if (matchedDeadlineText) {
+    content = content.replace(new RegExp(escapeRegExp(String(matchedDeadlineText).normalize("NFC")), "giu"), " ");
+  }
+
+  content = content
+    .replace(/^\s*(?:hãy|hay)\s+(?:log|ghi|tạo|tao)\s+(?:task|công việc)\s+(?:cho\s+)?/iu, "")
+    .replace(/^\s*(?:giao\s+cho|phụ\s+trách|log\s+task\s+cho|(?:tạo|tao|ghi)\s+(?:task|công việc)\s+cho|assigned\s+to|assign\s+to)\s+/iu, "")
+    .replace(/^\s*(?:hãy|hay|please|làm\s+ơn|cần|phải|sẽ|nhờ|giúp)\s+/iu, "")
+    .replace(/^\s*(?:tôi|mình|em|tớ|tui|me|myself)\s+/iu, "")
+    .replace(/^\s*(?:cần|phải|sẽ)\s+/iu, "")
+    .replace(/(?<![\p{L}\p{N}])(?:cho\s+(?:anh|chị|chi|em|mình|minh)|giúp\s+(?:anh|chị|chi|em|mình|minh)|nhờ\s+(?:anh|chị|chi|em|mình|minh|bạn|ban))(?![\p{L}\p{N}])/giu, " ")
+    .replace(/(?:^|\s+)(?:nhé|nha|nhá|ạ|với|nhờ|giúp|làm\s+ơn|please|thanks)[.!?,;]*\s*$/iu, " ")
+    .replace(/\s{2,}/g, " ");
+
+  const cleaned = cleanHintText(content.replace(/[.!?]+$/g, ""));
+  if (!cleaned) return null;
+  return cleaned[0].toLocaleUpperCase("vi-VN") + cleaned.slice(1);
+}
+
 function extractPayloadHints(text, payload, referenceDate = getReferenceDate(), holidayDates = "") {
-  const value = typeof text === "string" ? text.trim() : "";
+  const value = typeof text === "string" ? text : "";
   const mentions = getPayloadMentions(payload);
-  const assignmentMatch = value.match(/(?:giao cho|phụ trách|log\\s+task\\s+cho|(?:tạo|tao|ghi)\\s+(?:task|công việc)\\s+cho|assigned to|assign to)\b/i);
+  const assignmentMatch = value.match(/(?:giao cho|phụ trách|log\s+task\s+cho|(?:tạo|tao|ghi)\s+(?:task|công việc)\s+cho|assigned to|assign to)\b/i);
   const assignmentPosition = assignmentMatch?.index ?? -1;
   const nonRoutingMentions = mentions.filter((mention) => Number.isInteger(mention.location) && mention.location > 0);
   const targetMention = assignmentPosition >= 0
@@ -507,22 +549,11 @@ function extractPayloadHints(text, payload, referenceDate = getReferenceDate(), 
   const deadlineDetails = extractDeadlineText(value, referenceDate, holidayDates);
   const deadline = deadlineDetails?.date || null;
 
-  let taskContent = value;
-  if (mentions.length) {
-    for (const mention of [...mentions].sort((a, b) => b.location - a.location)) {
-      if (Number.isInteger(mention.location) && Number.isInteger(mention.length) && mention.length > 0) {
-        taskContent = `${taskContent.slice(0, mention.location)}${taskContent.slice(mention.location + mention.length)}`;
-      }
-    }
-  }
-  taskContent = taskContent.normalize("NFC")
-    .replace(/^\s*(?:giao cho|phụ trách|log\s+task\s+cho|(?:tạo|tao|ghi)\s+(?:task|công việc)\s+cho|assigned to|assign to)\s+/i, "")
-    .replace(/^\s*(?:hãy|hay)\s+(?:log|ghi|tạo)\s+(?:task|công việc)\s+(?:cho\s+)?(?:tôi|mình|em)\s+/i, "")
-    .replace(new RegExp(`\\s*${"(?:deadline|hạn(?: chót| hoàn thành)?|due date|trước|(?:hoàn thành|hoàn tất)\\s+(?:vào\\s+)?ngày|vào\\s+ngày)"}\\s*(?:(?:là|sang|thành|vào|trước)\\s*)?[:=-]?\\s*${"(?:hôm nay|ngày mai|ngày\\s+\\d{1,2}|thứ\\s+(?:[2-7]|hai|ba|tư|năm|sáu|bảy)(?:\\s+(?:tuần\\s+(?:sau|tới)|next\\s+week))?|\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2})"}(?=\\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\\b))`, "i"), " ")
-    .replace(/\s*trước\s+(?:\d{1,2}(?::\d{2})?\s*(?:giờ|h)\s*(?:sáng|trưa|chiều|tối)?\s*(?:hôm nay|nay|today))(?=\s*(?:[,;]|$|(?:phải|cần|sẽ|là|để)\b))/i, " ")
-    .replace(/\s+(?:(?:trong\s+)?(?:tuần\s+sau\s+nữa|hai\s+tuần\s+tới|tuần\s+(?:sau|tới|này|trước)))(?:\s+nhé)?\b/i, " ")
-    .replace(/^\s*(?:phải|cần|sẽ)\s+/i, "")
-    .replace(/\s{2,}/g, " ");
+  const cleanedTaskContent = cleanTaskContent(value, {
+    matchedDeadlineText: deadlineDetails?.matchedText,
+    mentions,
+    sourceText: value,
+  });
 
   return {
     pic: targetMention
@@ -536,7 +567,7 @@ function extractPayloadHints(text, payload, referenceDate = getReferenceDate(), 
           : getPayloadSenderEmail(payload),
     deadline,
     taskContent: mentions.length || assignmentPosition >= 0 || selfReference || deadline
-      ? cleanHintText(taskContent)
+      ? cleanedTaskContent
       : null,
     status: null,
   };
@@ -550,6 +581,11 @@ function mergeFields(primary, fallback) {
     priority: primary.priority || fallback.priority || null,
     status: primary.status || fallback.status || null,
   };
+}
+
+function isReasonableTaskContent(value) {
+  const text = asText(value);
+  return Boolean(text && text.length >= 3 && text.length <= 500);
 }
 
 function hasExplicitTaskRevision(text) {
@@ -741,12 +777,23 @@ function createTaskExtractor({
   async function extract(text, payload, { context = null } = {}) {
     const fallback = extractLabeledFields(text, extractionReferenceDate, holidayDates);
     const payloadHints = extractPayloadHints(text, payload, extractionReferenceDate, holidayDates);
+    const deadlineDetails = extractDeadlineText(text, extractionReferenceDate, holidayDates);
+    const mentions = getPayloadMentions(payload);
     const inferredPriority = inferPriorityFromText(text);
     const activeProvider = providerName();
 
     if (activeProvider === "rules") {
       const fields = mergeFields(payloadHints, mergeFields(fallback, { pic: null, deadline: null, taskContent: text, priority: inferredPriority, status: null }));
-      return { ...finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates), source: "rules" };
+      const finalized = finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates);
+      return {
+        ...finalized,
+        taskContent: cleanTaskContent(finalized.taskContent, {
+          matchedDeadlineText: deadlineDetails?.matchedText,
+          mentions,
+          sourceText: text,
+        }),
+        source: "rules",
+      };
     }
 
     const content = activeProvider === "chatflow"
@@ -759,6 +806,9 @@ function createTaskExtractor({
       priority: fallback.priority || inferredPriority,
       taskContent: context && !hasExplicitTaskRevision(text) ? null : fallback.taskContent || asText(text),
     }));
+    if (isReasonableTaskContent(parsed.taskContent)) {
+      fields = { ...fields, taskContent: parsed.taskContent };
+    }
     fields = { ...fields, priority: fallback.priority || inferredPriority };
     const hasExplicitDeadline = Boolean(payloadHints.deadline || fallback.deadline);
     if (!hasExplicitDeadline && inferredPriority) {
@@ -768,7 +818,19 @@ function createTaskExtractor({
         deadline: deadlineFromPriority(inferredPriority, extractionReferenceDate),
       };
     }
-    return { ...finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates), source: activeProvider };
+    const finalized = finalizeFields(mergeRevisionFields(fields, context, text, payload), extractionReferenceDate, holidayDates);
+    const parsedDeadlineDetails = parsed.deadlineExpression
+      ? extractDeadlineText(parsed.deadlineExpression, extractionReferenceDate, holidayDates)
+      : null;
+    return {
+      ...finalized,
+      taskContent: cleanTaskContent(finalized.taskContent, {
+        matchedDeadlineText: deadlineDetails?.matchedText || parsedDeadlineDetails?.matchedText,
+        mentions,
+        sourceText: text,
+      }),
+      source: activeProvider,
+    };
   }
 
   return {
@@ -785,6 +847,7 @@ export {
   TASK_PRIORITY_POLICY,
   createTaskExtractor,
   extractJson,
+  extractDeadlineText,
   extractPayloadHints,
   extractLabeledFields,
   normalizeDeadline,
