@@ -537,12 +537,12 @@ Hãy giữ nguyên field không được yêu cầu thay đổi. Chỉ thay fiel
 }
 
 function finalizeFields(fields, referenceDate, holidayDates) {
-  const priority = normalizePriority(fields.priority) || "P2";
-  const deadline = fields.deadline || deadlineFromPriority(priority, referenceDate);
+  const explicitPriority = normalizePriority(fields.priority);
+  const deadline = fields.deadline || deadlineFromPriority(explicitPriority || "P2", referenceDate);
   return {
     ...fields,
     deadline,
-    priority: resolvePriority(priority, deadline, referenceDate),
+    priority: explicitPriority || priorityFromIsoDeadline(deadlineToIso(deadline), referenceDate) || "P2",
     status: normalizeStatus(fields.status) || "IN PROGRESS",
   };
 }
@@ -665,6 +665,7 @@ function createTaskExtractor({
       priority: fallback.priority || inferredPriority,
       taskContent: context && !hasExplicitTaskRevision(text) ? null : fallback.taskContent || asText(text),
     }));
+    fields = { ...fields, priority: fallback.priority || inferredPriority };
     const hasExplicitDeadline = Boolean(payloadHints.deadline || fallback.deadline);
     if (!hasExplicitDeadline && inferredPriority) {
       fields = {

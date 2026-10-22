@@ -46,7 +46,7 @@ test("extractLabeledFields handles rule-based fallback", () => {
 });
 
 test("rules provider keeps the message as task content without inventing fields", async () => {
-  const extractor = createTaskExtractor({ provider: "rules" });
+  const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-09-19" });
   const result = await extractor.extract("Cần cập nhật dashboard trước 25/09/2026", { event_type: "message" });
   assert.deepEqual(result, {
     pic: null,
@@ -63,6 +63,27 @@ test("priority defaults to P2 when no deadline is available", async () => {
   const result = await extractor.extract("Cập nhật tài liệu hướng dẫn", { event_type: "message" });
   assert.equal(result.priority, "P2");
   assert.match(result.deadline, /^\d{2}\/\d{2}\/\d{4}$/);
+});
+
+test("rules provider derives priority from deadline unless the user labels it", async () => {
+  const cases = [
+    ["22/10/2026", "P0"],
+    ["23/10/2026", "P0"],
+    ["25/10/2026", "P1"],
+    ["27/10/2026", "P2"],
+    ["21/10/2026", "P0"],
+    ["22/10/2026", "P2", "priority: P2; "],
+  ];
+
+  for (const [deadline, expectedPriority, prefix = ""] of cases) {
+    const extractor = createTaskExtractor({ provider: "rules", referenceDate: "2026-10-22" });
+    const result = await extractor.extract(
+      `${prefix}deadline: ${deadline}; nội dung công việc: kiểm tra build`,
+      { event_type: "message" },
+    );
+    assert.equal(result.deadline, deadline);
+    assert.equal(result.priority, expectedPriority, `deadline ${deadline} with ${prefix || "no priority label"}`);
+  }
 });
 
 test("priority follows the policy for ISO deadlines", () => {
