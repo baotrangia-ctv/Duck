@@ -5,7 +5,8 @@
 Alpha Intel SeaTalk inbox is a dependency-free Node.js HTTP server for SeaTalk callbacks.
 It parses task requests from Vietnamese chat, prepares confirmation cards, and can write
 confirmed tasks to Google Sheets. A static dashboard displays recent events and extraction
-state in real time.
+state in real time. Dashboard and API access require a signed session for an account in the
+owner/viewer allowlist; SeaTalk webhook routes remain server-to-server.
 
 ## Quick start
 
@@ -18,9 +19,12 @@ Requirements: Node.js 18+ (README requirement; package.json does not declare eng
     npm run eval:extract -- --provider rules
 
 The rules-only extractor needs no external credentials. To run the dashboard in PowerShell
-without an LLM provider, set $env:TASK_EXTRACTOR = "rules" before npm start. POST
-http://localhost:3030/api/test-message to create a local sample; it extracts fields without
-sending a confirmation card or writing a Sheet row. The default server bind is 0.0.0.0:3030.
+without an LLM provider, set $env:TASK_EXTRACTOR = "rules" before npm start. Create
+`.auth/allowlist.json` from `allowlist.example.json` and configure the Google OAuth client for
+login. For a trusted local-only session, set `$env:HOST = "127.0.0.1"` and
+`$env:AUTH_DISABLED = "true"`. POST http://localhost:3030/api/test-message to create a local
+sample; it extracts fields without sending a confirmation card or writing a Sheet row. The
+default server bind is 0.0.0.0:3030 and requires `SEATALK_SIGNING_SECRET`.
 
 ## Repo map
 
@@ -31,6 +35,10 @@ sending a confirmation card or writing a Sheet row. The default server bind is 0
 | src/seatalk.js | SeaTalk API client and message/card builders |
 | src/google-sheets.js | Google Sheets REST API, service-account auth, row reads/writes |
 | src/google-service-account.js | Service-account key loading, signed JWTs, cached access tokens |
+| src/allowlist.js | Reloadable owner/viewer allowlist with fail-closed behavior |
+| src/session.js | Signed, sliding dashboard session cookies |
+| src/google-login.js | Google login state, token exchange, verified-email allowlisting |
+| src/access-control.js | Dashboard/API route-role table and same-origin checks |
 | src/thread-sessions.js | In-memory thread/task model and routing |
 | src/confirmation-auth.js | Identity checks for confirmations and updates |
 | src/confirmation-routing.js | Callback button-value parser |
@@ -50,10 +58,12 @@ sending a confirmation card or writing a Sheet row. The default server bind is 0
 5. resolveTaskRoute and detectTaskIntent choose a new task, draft revision, clarification, or Sheet update.
 6. createTaskExtractor combines local rules, payload hints, and an optional Chatflow or Compass call.
 7. The task is kept in threadSessions and shown in a SeaTalk interactive confirmation card.
-8. A valid Confirm click checks identity, required fields, Sheet configuration, and service-account access.
+8. The dashboard checks the signed session and current allowlist role; a valid Confirm click
+   checks task identity, required fields, Sheet configuration, and service-account access.
 9. GoogleSheetsClient appends a TODO row; the PIC receives an interactive DM and can acknowledge it
    to set IN PROGRESS.
-10. Dashboard snapshots and processing changes are broadcast over /api/stream SSE.
+10. Dashboard/API routes require an allowlisted session; snapshots and processing changes use
+    /api/stream SSE, while webhook routes stay public for SeaTalk callbacks.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.md).
 
@@ -74,8 +84,11 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
   tests aligned. Rule files are loaded when task-extractor.js is imported; restart the server.
 - Preserve the Google Sheet A–I contract, task button-value grammar, endpoint meanings, and
   authorization behavior unless deliberately making a breaking change.
-- Treat dashboard routes as unauthenticated and CORS as wildcard; do not expose the default
-  0.0.0.0 bind to an untrusted network without an explicit deployment review.
+- Dashboard and API routes require a signed session and a current allowlist role. CORS headers
+  are not sent; mutating dashboard requests validate Origin against Host.
+- SeaTalk webhook routes remain public and are protected only when SEATALK_SIGNING_SECRET is
+  set. An empty secret accepts unsigned callbacks; non-loopback binds require a nonempty secret.
+- AUTH_DISABLED=true works only with a loopback HOST; never expose it on an untrusted network.
 
 ## Git workflow & commit convention
 

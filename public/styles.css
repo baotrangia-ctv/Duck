@@ -39,6 +39,11 @@ code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monosp
 h1, h2, h3, h4, p { margin-top: 0; }
 h1 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
 .connection-state { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; }
+.topbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 18px; flex-wrap: wrap; }
+.user-session { display: flex; align-items: center; gap: 11px; color: var(--muted); font-size: 11px; }
+.user-session[hidden] { display: none; }
+.user-session span { max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-session .ghost-button { padding: 7px 9px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 0 4px rgba(77, 224, 188, .1), 0 0 16px rgba(77, 224, 188, .45); }
 .connection-state[data-state="connecting"] .status-dot { background: var(--orange); box-shadow: 0 0 0 4px rgba(255, 201, 120, .09); }
 .connection-state[data-state="offline"] .status-dot { background: #ff7c89; box-shadow: 0 0 0 4px rgba(255, 124, 137, .09); }

@@ -1,7 +1,26 @@
-const state = { messages: [], google: null };
+const state = { messages: [], google: null, user: null };
 const $ = (selector) => document.querySelector(selector);
 
 $("#webhookUrl").textContent = `${window.location.origin}/callback`;
+
+async function apiFetch(input, options) {
+  const response = await fetch(input, options);
+  if (response.status === 401) window.location.assign("/login");
+  return response;
+}
+
+function applyUser(user) {
+  state.user = user;
+  const sessionPanel = $("#sessionPanel");
+  sessionPanel.hidden = !user;
+  if (user) {
+    const roleLabel = user.role === "owner" ? "Chủ sở hữu" : "Người xem";
+    $("#userIdentity").textContent = `${user.email} · ${roleLabel}`;
+  }
+  const owner = user?.role === "owner";
+  $("#clearButton").hidden = !owner;
+  $("#testButton").hidden = !owner;
+}
 
 function formatTime(iso) {
   const date = new Date(iso);
@@ -140,7 +159,7 @@ function renderGoogleStatus() {
     return;
   }
 
-  if (status.sheetAccess) {
+  if (status.authorized && status.sheetAccess) {
     title.textContent = "Đã truy cập được Google Sheet";
     text.textContent = `Đã truy cập được Google Sheet bằng ${status.accountEmail}.`;
     icon.textContent = "✓";
@@ -156,7 +175,8 @@ function renderGoogleStatus() {
 
 async function loadGoogleStatus() {
   try {
-    const response = await fetch("/api/google/status");
+    const response = await apiFetch("/api/google/status");
+    if (!response.ok) throw new Error("Unable to load Google Sheets status");
     state.google = await response.json();
     renderGoogleStatus();
   } catch {
@@ -165,7 +185,8 @@ async function loadGoogleStatus() {
 }
 
 async function loadMessages() {
-  const response = await fetch("/api/messages");
+  const response = await apiFetch("/api/messages");
+  if (!response.ok) throw new Error("Unable to load dashboard messages");
   const data = await response.json();
   applySnapshot(data.messages);
 }
@@ -188,8 +209,20 @@ function connectStream() {
   };
   stream.onerror = () => {
     setConnection("offline", "Mất kết nối · đang thử lại");
-    stream.close();
-    setTimeout(connectStream, 2500);
+    void apiFetch("/api/me").then(async (response) => {
+      if (response.status === 401) return;
+      if (!response.ok) {
+        stream.close();
+        setTimeout(connectStream, 2500);
+        return;
+      }
+      applyUser(await response.json());
+      stream.close();
+      setTimeout(connectStream, 2500);
+    }).catch(() => {
+      stream.close();
+      setTimeout(connectStream, 2500);
+    });
   };
 }
 
@@ -197,7 +230,7 @@ $("#testButton").addEventListener("click", async () => {
   const button = $("#testButton");
   button.disabled = true;
   button.innerHTML = "Đang gửi…";
-  try { await fetch("/api/test-message", { method: "POST" }); } finally {
+  try { await apiFetch("/api/test-message", { method: "POST" }); } finally {
     button.disabled = false;
     button.innerHTML = "<span>＋</span> Gửi tin nhắn thử";
   }
@@ -205,7 +238,7 @@ $("#testButton").addEventListener("click", async () => {
 
 $("#clearButton").addEventListener("click", async () => {
   if (!state.messages.length || !confirm("Xóa toàn bộ lịch sử đang hiển thị?")) return;
-  await fetch("/api/messages", { method: "DELETE" });
+  await apiFetch("/api/messages", { method: "DELETE" });
 });
 
 $("#copyButton").addEventListener("click", async () => {
@@ -215,6 +248,23 @@ $("#copyButton").addEventListener("click", async () => {
   setTimeout(() => { button.textContent = "⧉"; }, 1400);
 });
 
-loadMessages().catch(() => setConnection("offline", "Không kết nối được"));
-loadGoogleStatus();
-connectStream();
+$("#logoutButton").addEventListener("click", async () => {
+  const response = await apiFetch("/auth/logout", { method: "POST" });
+  if (response.ok) window.location.assign("/login");
+});
+
+async function initializeDashboard() {
+  const response = await apiFetch("/api/me");
+  if (!response.ok) {
+    setConnection("offline", "Không xác thực được phiên đăng nhập");
+    return;
+  }
+  applyUser(await response.json());
+  await Promise.all([
+    loadMessages().catch(() => setConnection("offline", "Không kết nối được")),
+    loadGoogleStatus(),
+  ]);
+  connectStream();
+}
+
+initializeDashboard().catch(() => setConnection("offline", "Không kết nối được"));

@@ -18,6 +18,10 @@ compares fixture expectations for deadline, priority, and task.
 | test/task-extractor.test.js | JSON parsing, prompt, deterministic and mocked LLM extraction, deadlines, priorities, revisions, card builders, SeaTalk calls and auth |
 | test/google-service-account.test.js | Generated-key JWT signature/claims, token cache and concurrent refresh, invalid key handling |
 | test/google-sheets.test.js | Service-account status, Sheet access cache, and 403/404 error mapping |
+| test/allowlist.test.js | Missing/invalid files, mtime reloads, email normalization, and role precedence |
+| test/session.test.js | HMAC cookies, tampering/expiry, renewal threshold, flags, and secret persistence |
+| test/access-control.test.js | Public/viewer/owner route matrix, HTML redirects, unknown routes, loopback and same-origin policy |
+| test/google-login.test.js | OAuth state/cookie binding, expiry, verified email, allowlist, and session issuance |
 | test/task-acknowledgement.test.js | PIC-only acknowledgement, Sheet re-read/write, UpdatedAt, idempotence, final statuses, and card update |
 | test/sheet-task-updates.test.js | Update-intent/status parsing, A:I row conversion and Creator preservation, Sheet client lookup, update cards, PIC/Creator authorization and PIC notification routing |
 | test/thread-sessions.test.js | Session/task routing, quoted messages, clarification choices, five-task limit, short IDs, reopening |
@@ -26,7 +30,7 @@ compares fixture expectations for deadline, priority, and task.
 
 There is no direct test import of server.js. HTTP route handling, webhook signature validation,
 deduplication, SSE lifecycle, and orchestration across modules are not covered by a server-level
-test suite.
+test suite; the final login change includes a localhost HTTP smoke check.
 
 ## Fakes and fixture workflow
 
@@ -34,6 +38,8 @@ test suite.
   in finally. SeaTalkClient accepts a fetchImpl constructor option for outbound call tests.
 - Google service-account tests generate throwaway RSA keys and fake the token endpoint. Sheets
   tests inject token providers or replace readValues; no live Google account is used.
+- Google login tests fake both Google endpoints and use in-memory allowlist/session dependencies.
+- Auth tests use in-memory file adapters and deterministic session secrets; they do not open `.auth/`.
 - A fixture has message, deadline, priority, and task fields. Use the evaluator's pinned
   reference date for relative dates, or pass --reference-date explicitly.
 - Include focused unit tests for edge cases in addition to a fixture when changing parser
@@ -49,7 +55,15 @@ test suite.
 | Priority precedence or defaults | rules/TASK_PRIORITY_POLICY.md, deterministic code, conflicting-priority tests and fixtures, rules eval |
 | PIC or mention interpretation | rules/PIC_POLICY.md, payload-hint tests, task-extractor.js |
 | Card callback values | confirmation-routing.js, seatalk.js, parser/card tests; preserve existing callback compatibility |
-| Authorization | confirmation-auth.js, tests for missing and conflicting identity; inspect server call sites |
+| Authorization | confirmation-auth.js plus allowlist/session/access-control/login suites; inspect server call sites |
 | Sheet columns, row IDs, or service-account auth | google-sheets.js, google-service-account.js, integrations docs, and client tests; treat contract changes as breaking |
 | HTTP/SSE flow | server.js and public/app.js; current tests do not exercise server.js directly |
 | Environment names/defaults | .env.example, server.js reads, integrations docs; treat runtime-changing changes as breaking |
+
+## Local HTTP smoke check
+
+Run the server on loopback with `TASK_EXTRACTOR=rules`, a temporary allowlist file outside the
+repository, `AUTH_SESSION_SECRET` set for the smoke process, and no Google credentials. Verify
+that `GET /` redirects to `/login`, `GET /api/messages` returns 401, `GET /healthz` returns
+`{ "ok": true }`, a SeaTalk `event_verification` POST returns 200, `/login` returns 200, and
+`GET /auth/google` returns 404. Stop the server after the checks; do not perform Google login.

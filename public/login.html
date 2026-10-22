@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Đăng nhập Alpha Intel" />
+    <title>Đăng nhập Alpha Intel</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, "Segoe UI", sans-serif; background: #081321; color: #e7f0fc; }
+      * { box-sizing: border-box; }
+      body { display: grid; min-height: 100vh; place-items: center; margin: 0; padding: 24px; background: radial-gradient(ellipse at 50% 0%, #172d4b, #081321 68%); }
+      main { width: min(100%, 420px); padding: 36px; border: 1px solid rgba(133, 169, 213, .2); border-radius: 18px; background: rgba(13, 27, 45, .94); box-shadow: 0 24px 80px rgba(0, 0, 0, .34); }
+      .mark { display: grid; width: 42px; height: 42px; place-items: center; margin-bottom: 22px; border: 1px solid rgba(77, 224, 188, .35); border-radius: 12px; color: #4de0bc; background: rgba(77, 224, 188, .08); font-size: 24px; }
+      .eyebrow { margin: 0 0 8px; color: #8ca3bd; font-size: 11px; font-weight: 700; letter-spacing: .16em; }
+      h1 { margin: 0; font-size: 26px; letter-spacing: -.04em; }
+      p { margin: 14px 0 24px; color: #a6b8cd; font-size: 14px; line-height: 1.6; }
+      .error { min-height: 22px; margin: 0 0 18px; color: #ff9daa; }
+      a { display: grid; min-height: 46px; place-items: center; border: 1px solid rgba(77, 224, 188, .38); border-radius: 9px; color: #061b1a; background: #4de0bc; font-size: 14px; font-weight: 750; text-decoration: none; transition: background .18s ease; }
+      a:hover { background: #87efd6; }
+      .note { margin: 18px 0 0; color: #7389a3; font-size: 11px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">✓</div>
+      <p class="eyebrow">ALPHA INTEL</p>
+      <h1>Đăng nhập Alpha Intel</h1>
+      <p>Đăng nhập bằng tài khoản Google đã được cấp quyền truy cập.</p>
+      <p class="error" id="loginError" role="alert" aria-live="polite"></p>
+      <a href="/auth/login">Đăng nhập bằng Google</a>
+      <p class="note">Chỉ tài khoản trong danh sách cho phép mới có thể truy cập.</p>
+    </main>
+    <script>
+      const messages = {
+        forbidden: "Tài khoản này chưa được cấp quyền truy cập.",
+        cancelled: "Bạn đã hủy đăng nhập.",
+      };
+      const error = new URLSearchParams(window.location.search).get("error");
+      if (error) document.querySelector("#loginError").textContent = messages[error] || "Đăng nhập không thành công. Vui lòng thử lại.";
+    </script>
+  </body>
+</html>

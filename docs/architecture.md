@@ -27,6 +27,11 @@ flowchart TD
   SA -->|JWT bearer grant| GT[Google token endpoint]
   GT -->|access token| SA
   SA -->|Bearer token| GS
+  BROWSER[Browser] -->|session cookie| ACL[access-control and allowlist]
+  ACL --> DASH[public/app.js dashboard]
+  BROWSER -->|Google sign-in| LOGIN[google-login]
+  LOGIN -->|openid email| G[Google OAuth]
+  LOGIN -->|signed session cookie| BROWSER
 ```
 
 For the message routing and card destination details, see [flows](flows.md) and the
@@ -40,6 +45,10 @@ README/source mismatch in [gotchas](gotchas.md).
 | src/task-extractor.js | node:fs, node:url | Reads policy files and implements extraction/date logic and optional LLM calls |
 | src/google-sheets.js | sheet-task-updates.js | Google Sheets API calls, row conversion/search, access status and serialized writes |
 | src/google-service-account.js | node:crypto, node:fs | Loads a service-account key, signs JWT assertions and caches access tokens |
+| src/allowlist.js | node:fs | Reloads owner/viewer email lists on mtime changes and fails closed |
+| src/session.js | node:crypto, node:fs, node:path | Signs, verifies, renews and clears dashboard session cookies; persists a generated key when needed |
+| src/google-login.js | node:crypto, session.js | Handles state-bound Google login and verified-email allowlisting |
+| src/access-control.js | No project modules | Pure route-role table, loopback and same-origin checks |
 | src/seatalk.js | No project modules | SeaTalk API client and outbound card/text builders |
 | src/thread-sessions.js | No project modules | Pure session/task/clarification model and message-based routing |
 | src/confirmation-auth.js | No project modules | Identity normalization and authorization predicates |
@@ -63,12 +72,15 @@ acknowledgement handler re-reads the row and changes TODO to IN PROGRESS with a 
 | State | Key / content | Creation and cleanup | Restart consequence |
 |---|---|---|---|
 | messages | Array keyed for duplicate search by record.id; id is event_id, parsed messageId, or a local synthetic ID. Records hold parsed data, raw payload, and processing state. | addMessage prepends newest first; capped at 100. DELETE /api/messages empties only this array. | Dashboard history and dedupe records are lost. |
-| clients | Set of open SSE response objects | Added by handleStream; removed on request close | Browser reconnects and receives a fresh snapshot. |
+| clients | Set of open SSE response objects | Added by handleStream; removed on response close or auth recheck | Browser reconnects and receives a fresh snapshot. |
+| googleLogin.states | Random state → expiration timestamp | Created by `GET /auth/login`; expires after 10 minutes and is consumed once by the callback | Pending login handshakes fail. |
 | threadSessions | Key is group:<groupId>:thread:<threadId-or-messageId>, single:<employeeCode>, or sender:<senderId>; value holds target, tasks keyed by shortId, and pendingClarifications keyed by clarifyId. | Created on first routed message; no runtime eviction | Drafts, short IDs, routing history, and pending clarification choices disappear. |
 | confirmationDrafts | task:confirm:<draftId> → threadKey, shortId, recordId, draftId | Added before sending a confirmation card; replaced/removed on resend, send failure, or successful write; no TTL | Old cards refer to an unknown draft and cannot be confirmed. |
 | sheetUpdateDrafts | updateId → Sheet row, fields, PIC/Creator identity, and promise guards | Created for a Sheet-update card; removed after successful confirmation; failures may leave it in memory; no TTL | Existing update cards cannot be confirmed. |
 | sheetMessageReferences | SeaTalk message ID → numeric Sheet Task ID | Recorded for sent assignment/update messages; no TTL or size cap | Quoting an old remembered message no longer finds its Sheet task. |
 
+The session cookie is signed and stateless; the server checks its email against the current
+allowlist on every request. Role changes therefore apply without rewriting the cookie.
 threadSessions and its task maps are not size-limited. The message cap does not cap those maps.
 confirmationDrafts, sheetUpdateDrafts, and sheetMessageReferences also have no general size
 limit; their entries are removed only on specific flow paths. The service-account access token

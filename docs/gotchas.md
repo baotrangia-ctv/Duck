@@ -2,16 +2,33 @@
 
 Ordered roughly by blast radius.
 
-## Dashboard/API has no access control
+## Allowlist errors fail closed
 
-- **What:** The server binds to 0.0.0.0 by default. Dashboard/API routes are unauthenticated,
-  JSON and SSE responses allow Access-Control-Allow-Origin: *, and /api/messages returns raw
-  event payloads.
-- **Why:** A reachable deployment can expose message contents and allow actions such as
-  clearing the feed or disconnecting Google.
-- **Where:** server.js createServer handler, sendJson, handleStream, and listen setup.
-- **Do:** Keep this local/private or put an authenticated boundary in front of it after an
-  explicit deployment review. Do not treat CORS as authentication.
+- **What:** Missing or malformed `.auth/allowlist.json` denies access. After a valid config has
+  loaded, an invalid edit keeps the last valid owner/viewer lists; deletion denies everyone.
+- **Why:** Dashboard/API access must not become public when the allowlist cannot be read.
+- **Where:** src/allowlist.js and `AUTH_ALLOWLIST_PATH`.
+- **Do:** Copy `allowlist.example.json` to `.auth/allowlist.json`, keep valid JSON arrays for
+  `owners` and `viewers`, then verify account changes take effect without restart.
+
+## SeaTalk webhook stays public
+
+- **What:** Dashboard authentication does not protect `/callback`, `/seatalk/callback`, or
+  `/webhook/seatalk`. An empty `SEATALK_SIGNING_SECRET` accepts unsigned requests.
+- **Why:** SeaTalk is server-to-server and does not send a browser session cookie.
+- **Where:** server.js startup safety and handleWebhook/signaturesMatch.
+- **Do:** Set `SEATALK_SIGNING_SECRET` before binding to a non-loopback host. The server refuses
+  non-loopback startup when the secret is empty. `AUTH_DISABLED=true` is loopback-only too.
+
+## Session continuity depends on its signing secret
+
+- **What:** Dashboard sessions are signed cookies checked against the current allowlist on every
+  request. Without an explicit secret, the server persists a generated key at `.auth/session-secret`.
+- **Why:** The same key keeps sessions valid across restarts; changing or losing it invalidates
+  every existing cookie.
+- **Where:** src/session.js and `AUTH_SESSION_SECRET`.
+- **Do:** Keep `.auth/` private and persistent. If you set `AUTH_SESSION_SECRET`, preserve the
+  same value between restarts.
 
 ## README and current confirmation-card destination disagree
 
@@ -135,5 +152,5 @@ Ordered roughly by blast radius.
   this checkout path.
 - **Why:** Copying it literally can send a developer to a nonexistent directory.
 - **Where:** README.md under “Chạy local”.
-- **Do:** Treat the README path as an example/spec, not a portable path. This doc-only task
-  intentionally left README unchanged.
+- **Do:** Treat the README path as an example, not a portable path; use your current repository
+  root instead.

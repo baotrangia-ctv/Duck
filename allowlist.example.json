@@ -1,0 +1,4 @@
+{
+  "owners": ["owner@example.com"],
+  "viewers": ["viewer@example.com"]
+}

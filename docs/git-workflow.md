@@ -34,7 +34,7 @@ local; the user decides when to push.
 6. Run git log -1 --stat and git status --short. Report the short hash and header, and state
    that nothing was pushed.
 
-Never stage .env or .oauth/ contents. Do not use --amend, rebase, reset --hard, --force,
+Never stage .env, .auth/, .oauth/, service-account keys, or token contents. Do not use --amend, rebase, reset --hard, --force,
 --force-with-lease, git clean -f, commit --no-verify, commit --no-gpg-sign, or git config
 changes. Do not bypass hooks. If a hook fails, fix the cause and make a new commit. Do not
 add Co-authored-by or generated-by trailers unless requested. Rewrite history only if asked.

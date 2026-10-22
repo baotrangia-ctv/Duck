@@ -6,6 +6,15 @@ import { createServer } from "node:http";
 import { createTaskExtractor, extractPayloadHints } from "./src/task-extractor.js";
 import { GoogleSheetsClient } from "./src/google-sheets.js";
 import { GoogleServiceAccountTokenProvider } from "./src/google-service-account.js";
+import { createAllowlist } from "./src/allowlist.js";
+import { authorizeRequest, isLoopbackHost, isSameOrigin } from "./src/access-control.js";
+import { createGoogleLogin } from "./src/google-login.js";
+import {
+  createSessionManager,
+  getCookieValue,
+  loadOrCreateSessionSecret,
+  SESSION_COOKIE,
+} from "./src/session.js";
 import {
   SeaTalkClient,
   buildConfirmationMessage,
@@ -58,6 +67,18 @@ loadEnvFile();
 const port = Number.parseInt(process.env.PORT || "3030", 10);
 const host = process.env.HOST || "0.0.0.0";
 const signingSecret = process.env.SEATALK_SIGNING_SECRET || "";
+const authDisabled = process.env.AUTH_DISABLED === "true";
+if (authDisabled && !isLoopbackHost(host)) {
+  console.error("AUTH_DISABLED=true is allowed only when HOST is 127.0.0.1, localhost, or ::1.");
+  process.exit(1);
+}
+if (!signingSecret) {
+  console.warn("WARNING: SEATALK_SIGNING_SECRET is empty; the SeaTalk webhook accepts unsigned requests.");
+  if (!isLoopbackHost(host)) {
+    console.error("SEATALK_SIGNING_SECRET is required when HOST is not loopback because auth does not protect the webhook.");
+    process.exit(1);
+  }
+}
 const seatalk = new SeaTalkClient({
   appId: process.env.SEATALK_APP_ID || "",
   appSecret: process.env.SEATALK_APP_SECRET || "",
@@ -67,6 +88,7 @@ const seatalk = new SeaTalkClient({
 const chatflowUrl = process.env.CHATFLOW_API_URL || "";
 const chatflowToken = process.env.CHATFLOW_API_TOKEN || "";
 const googleSheetsWriteEnabled = String(process.env.GOOGLE_SHEETS_WRITE_ENABLED || "false").toLowerCase() === "true";
+const googleOAuthRedirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || `http://localhost:${port}/auth/google/callback`;
 const googleServiceAccountKeyPath = resolve(root, process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || ".auth/google-service-account.json");
 const taskExtractor = createTaskExtractor({
   provider: process.env.TASK_EXTRACTOR || "auto",
@@ -83,6 +105,25 @@ const googleSheets = new GoogleSheetsClient({
   sheetName: process.env.GOOGLE_SHEETS_SHEET_NAME || "Sheet1",
   range: process.env.GOOGLE_SHEETS_RANGE || "A:I",
   tokenProvider: googleTokenProvider,
+});
+const authAllowlist = createAllowlist({
+  path: resolve(root, process.env.AUTH_ALLOWLIST_PATH || ".auth/allowlist.json"),
+});
+const authSessionSecret = loadOrCreateSessionSecret({
+  envSecret: process.env.AUTH_SESSION_SECRET || "",
+  secretPath: resolve(root, ".auth/session-secret"),
+});
+const sessionManager = createSessionManager({
+  secret: authSessionSecret,
+  ttlDays: process.env.AUTH_SESSION_TTL_DAYS || "30",
+  secure: googleOAuthRedirectUri.startsWith("https://"),
+});
+const googleLogin = createGoogleLogin({
+  clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+  clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+  redirectUri: googleOAuthRedirectUri,
+  allowlist: authAllowlist,
+  sessionManager,
 });
 const maxMessages = 100;
 const messages = [];
@@ -105,7 +146,6 @@ function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
-    "Access-Control-Allow-Origin": "*",
   });
   response.end(body);
 }
@@ -1215,16 +1255,65 @@ function broadcast(data) {
   for (const response of clients) response.write(packet);
 }
 
-function handleStream(request, response) {
+function handleStream(request, response, session) {
   response.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache",
+    "Cache-Control": "no-store",
     Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
   });
   response.write(`data: ${JSON.stringify({ type: "snapshot", messages })}\n\n`);
   clients.add(response);
-  request.on("close", () => clients.delete(response));
+  let sessionTimer = null;
+  const removeClient = () => {
+    clients.delete(response);
+    if (sessionTimer) clearInterval(sessionTimer);
+  };
+  if (!authDisabled) {
+    sessionTimer = setInterval(() => {
+      if (!sessionManager.isValidSession(session) || !authAllowlist.getRole(session.email)) {
+        removeClient();
+        if (!response.writableEnded) response.end();
+      }
+    }, 60_000);
+  }
+  response.on("close", removeClient);
+}
+
+function redirect(response, location, cookies = []) {
+  response.writeHead(302, {
+    Location: location,
+    "Cache-Control": "no-store",
+    ...(cookies.length ? { "Set-Cookie": cookies } : {}),
+  });
+  response.end();
+}
+
+function resolveRequestRole(request, response) {
+  if (authDisabled) {
+    request.auth = { email: "local@dev", role: "owner" };
+    request.authSession = null;
+    return "owner";
+  }
+  const cookie = getCookieValue(getHeader(request, "cookie"), SESSION_COOKIE);
+  const session = sessionManager.verifyCookie(cookie);
+  const role = session ? authAllowlist.getRole(session.email) : null;
+  if (!session || !role) {
+    if (cookie) response.setHeader("Set-Cookie", sessionManager.clearCookie());
+    request.auth = null;
+    request.authSession = null;
+    return null;
+  }
+  const renewed = sessionManager.renew(session);
+  const activeSession = renewed?.payload || session;
+  if (renewed) response.setHeader("Set-Cookie", sessionManager.cookieHeader(renewed.payload));
+  request.auth = { email: session.email, role };
+  request.authSession = activeSession;
+  return role;
+}
+
+function hasInvalidOrigin(request) {
+  const origin = getHeader(request, "origin");
+  return !isSameOrigin(origin, getHeader(request, "host"));
 }
 
 function shouldProcessMessage(record) {
@@ -1295,7 +1384,7 @@ async function handleWebhook(request, response) {
   sendJson(response, 200, { ok: true, received: record.id, deduped: duplicate });
 }
 
-async function serveStatic(pathname, response) {
+async function serveStatic(pathname, response, authenticated = false) {
   const requested = pathname === "/" ? "/index.html" : pathname;
   const filePath = normalize(join(publicDir, requested));
 
@@ -1306,7 +1395,7 @@ async function serveStatic(pathname, response) {
 
   response.writeHead(200, {
     "Content-Type": mimeTypes[extname(filePath)] || "application/octet-stream",
-    "Cache-Control": "no-cache",
+    "Cache-Control": authenticated ? "no-store" : "no-cache",
   });
   createReadStream(filePath).pipe(response);
 }
@@ -1316,12 +1405,77 @@ const server = createServer(async (request, response) => {
   const { pathname } = url;
 
   if (request.method === "OPTIONS") {
-    response.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Signature",
-    });
+    response.writeHead(204);
     response.end();
+    return;
+  }
+
+  if (pathname === "/auth/google" || pathname === "/api/google/disconnect") {
+    sendJson(response, 404, { ok: false, error: "Không tìm thấy trang" });
+    return;
+  }
+
+  const webhookPath = ["/callback", "/seatalk/callback", "/webhook/seatalk"].includes(pathname);
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && !webhookPath && hasInvalidOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "Bạn không có quyền thực hiện thao tác này" });
+    return;
+  }
+
+  const publicRequest = authorizeRequest({ method: request.method, pathname, accept: getHeader(request, "accept") }) === "allow";
+  let role = null;
+  if (!publicRequest) {
+    role = resolveRequestRole(request, response);
+    const decision = authorizeRequest({
+      method: request.method,
+      pathname,
+      accept: getHeader(request, "accept"),
+      role,
+      authDisabled,
+    });
+    if (decision === "redirect-login") {
+      redirect(response, "/login");
+      return;
+    }
+    if (decision === "unauthorized") {
+      sendJson(response, 401, { ok: false, error: "Chưa đăng nhập" });
+      return;
+    }
+    if (decision === "forbidden") {
+      sendJson(response, 403, { ok: false, error: "Bạn không có quyền thực hiện thao tác này" });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && pathname === "/healthz") {
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "GET" && (pathname === "/login" || pathname === "/login.html")) {
+    await serveStatic("/login.html", response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/auth/login") {
+    const result = googleLogin.startLogin();
+    redirect(response, result.location, result.cookies);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/auth/google/callback") {
+    const result = await googleLogin.handleCallback({ url, cookieHeader: getHeader(request, "cookie") });
+    redirect(response, result.location, result.cookies);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/auth/logout") {
+    response.setHeader("Set-Cookie", sessionManager.clearCookie());
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/me") {
+    sendJson(response, 200, { ok: true, email: request.auth.email, role: request.auth.role });
     return;
   }
 
@@ -1331,11 +1485,6 @@ const server = createServer(async (request, response) => {
       writeEnabled: googleSheetsWriteEnabled,
       sheetAccess: await googleSheets.checkSheetAccess(),
     });
-    return;
-  }
-
-  if (pathname === "/auth/google" || pathname === "/auth/google/callback" || pathname === "/api/google/disconnect") {
-    sendJson(response, 404, { ok: false, error: "Không tìm thấy trang" });
     return;
   }
 
@@ -1369,7 +1518,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && pathname === "/api/stream") {
-    handleStream(request, response);
+    handleStream(request, response, request.authSession);
     return;
   }
 
@@ -1395,7 +1544,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET") {
-    await serveStatic(pathname, response);
+    await serveStatic(pathname, response, Boolean(request.auth));
     return;
   }
 

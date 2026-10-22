@@ -9,7 +9,7 @@ Defaults below distinguish the runtime fallback from the value prefilled in .env
 |---|---|---|---|---|
 | Server | PORT | 3030 | No | server.js listen port |
 | Server | HOST | 0.0.0.0 | No | Bind address |
-| SeaTalk | SEATALK_SIGNING_SECRET | empty | No | Enables callback Signature validation when nonempty |
+| SeaTalk | SEATALK_SIGNING_SECRET | empty | Required off loopback | Enables callback Signature validation; empty accepts unsigned webhooks |
 | SeaTalk | SEATALK_APP_ID | empty | With app secret, unless access token supplied | SeaTalk app credentials |
 | SeaTalk | SEATALK_APP_SECRET | empty | With app ID, unless access token supplied | Requests app access token |
 | SeaTalk | SEATALK_ACCESS_TOKEN | empty | Alternative credential | Pre-issued token; avoids app-token request |
@@ -29,29 +29,43 @@ Defaults below distinguish the runtime fallback from the value prefilled in .env
 | Google | GOOGLE_OAUTH_CLIENT_SECRET | empty | For login | Google web OAuth client secret |
 | Google | GOOGLE_OAUTH_REDIRECT_URI | http://localhost:3030/auth/google/callback; code uses current PORT when unset | For login | Must match provider redirect configuration |
 | Google | GOOGLE_SHEETS_WRITE_ENABLED | false | To write | Only the case-insensitive string true enables writes |
+| Auth | AUTH_ALLOWLIST_PATH | .auth/allowlist.json | For dashboard access | Resolved relative to repo root; owner/viewer email lists |
+| Auth | AUTH_SESSION_SECRET | unset | No | HMAC key; if unset, a random key is persisted at .auth/session-secret |
+| Auth | AUTH_SESSION_TTL_DAYS | 30 | No | Sliding session lifetime |
+| Auth | AUTH_DISABLED | false | No | Only exact `true` disables auth; loopback HOST required |
 
 ## HTTP endpoints
 
-The dashboard/API currently have no authentication. Callback signatures are checked only when
-SEATALK_SIGNING_SECRET is configured. JSON and SSE responses currently allow wildcard CORS.
+Dashboard and API routes require a signed session for an account in the current allowlist.
+SeaTalk callback signatures are checked only when SEATALK_SIGNING_SECRET is configured; webhook
+routes remain public and do not use session cookies. Responses send no CORS headers. Mutating
+non-webhook requests with an Origin header must match the Host header. OPTIONS returns 204 with
+no CORS headers.
 
 | Method | Path | Purpose | Auth |
 |---|---|---|---|
-| GET | / | Serve dashboard index | None |
-| GET | /<static path> | Serve a file from public/ | None |
-| POST | /callback | SeaTalk callback | Optional Signature header check |
-| POST | /seatalk/callback | Callback alias | Optional Signature header check |
-| POST | /webhook/seatalk | Callback alias | Optional Signature header check |
-| GET | /api/health | Runtime and integration status | None |
-| GET | /api/messages | Current in-memory events | None |
-| DELETE | /api/messages | Clear in-memory event list and broadcast clear | None |
-| GET | /api/stream | Dashboard SSE snapshot and updates | None |
-| POST | /api/test-message | Create local sample and run extraction with skipSheet | None |
-| GET | /api/google/status | Service-account and Sheet-access status | None |
-| OPTIONS | * | CORS preflight | None |
+| GET | / | Serve dashboard index | Owner or viewer session |
+| GET | /<static path> | Serve a file from public/ | Owner or viewer session |
+| GET | /login, /login.html | Serve public login page | Public |
+| POST | /callback | SeaTalk callback | Public; optional Signature header check |
+| POST | /seatalk/callback | Callback alias | Public; optional Signature header check |
+| POST | /webhook/seatalk | Callback alias | Public; optional Signature header check |
+| GET | /healthz | Liveness response | Public |
+| GET | /auth/login | Start Google sign-in | Public |
+| GET | /auth/google/callback | Complete Google sign-in | Public; one-time state and cookie |
+| POST | /auth/logout | Clear current session | Owner or viewer session; same-origin |
+| GET | /api/me | Current account and role | Owner or viewer session |
+| GET | /api/health | Runtime and integration status | Owner or viewer session |
+| GET | /api/messages | Current in-memory events | Owner or viewer session |
+| GET | /api/stream | Dashboard SSE snapshot and updates | Owner or viewer session; rechecked every 60 s |
+| GET | /api/google/status | Service-account and Sheet-access status | Owner or viewer session |
+| DELETE | /api/messages | Clear in-memory event list and broadcast clear | Owner session |
+| POST | /api/test-message | Create local sample and run extraction with skipSheet | Owner session |
+| OPTIONS | * | Empty 204 response | Public |
 
-The default bind is 0.0.0.0, and /api/messages exposes raw event payloads. Treat the
-unauthenticated API, wildcard CORS, and bind address as deployment risks.
+The default bind is 0.0.0.0. A non-loopback bind requires a nonempty SeaTalk signing secret,
+because dashboard authentication does not protect webhook routes. `AUTH_DISABLED=true` is
+refused on non-loopback hosts.
 
 ## SeaTalk Open Platform
 
@@ -108,4 +122,18 @@ private and out of Git. The service-account `client_email` must be shared on the
 with Editor access. `/api/google/status` checks access with a lightweight spreadsheet metadata
 request and caches the result for 60 seconds. A 403 returns a share instruction; a 404 asks the
 operator to check the spreadsheet ID and sharing. Writes remain disabled unless
-GOOGLE_SHEETS_WRITE_ENABLED=true. The GOOGLE_OAUTH_* variables are reserved for dashboard login.
+GOOGLE_SHEETS_WRITE_ENABLED=true. The GOOGLE_OAUTH_* variables below are used only for dashboard login.
+
+## Dashboard login
+
+Google OAuth is used only for sign-in with `openid email` scopes; it does not grant Sheets API
+access. Configure the Web OAuth client ID/secret and callback URI, then maintain
+`.auth/allowlist.json` with `{ "owners": ["..."], "viewers": ["..."] }`. The role is looked
+up on every request, so edits take effect without restart. Missing or malformed allowlists deny
+access; after a valid load, an invalid edit keeps the last valid list until a valid replacement
+is saved. The signed session cookie contains email and timestamps, not role. It renews when less
+than half its lifetime remains. HTTPS redirect URIs add the Secure cookie flag.
+
+`AUTH_DISABLED=true` provides a local owner identity (`local@dev`) only when HOST is
+`127.0.0.1`, `localhost`, or `::1`. If AUTH_SESSION_SECRET is unset, the server writes a random
+32-byte key to `.auth/session-secret` with mode 0600 so cookies remain valid after restarts.

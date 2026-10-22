@@ -75,6 +75,13 @@ GOOGLE_SHEETS_SHEET_NAME=Sheet1
 GOOGLE_SHEETS_RANGE=A:I
 GOOGLE_SERVICE_ACCOUNT_KEY_PATH=.auth/google-service-account.json
 GOOGLE_SHEETS_WRITE_ENABLED=true
+GOOGLE_OAUTH_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=your-web-client-secret
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3030/auth/google/callback
+AUTH_ALLOWLIST_PATH=.auth/allowlist.json
+AUTH_SESSION_TTL_DAYS=30
+# Có thể đặt AUTH_SESSION_SECRET; nếu để trống server sẽ lưu secret ngẫu nhiên trong .auth/.
+AUTH_SESSION_SECRET=
 
 # SeaTalk outbound messaging for confirmation cards/thread replies.
 SEATALK_APP_ID=your_seatalk_app_id
@@ -86,6 +93,10 @@ SEATALK_API_BASE_URL=https://openapi.seatalk.io
 
 Trong Google Cloud, bật **Google Sheets API**, tạo service account rồi tải JSON key vào `.auth/google-service-account.json` (hoặc đường dẫn đặt trong `GOOGLE_SERVICE_ACCOUNT_KEY_PATH`). Share Google Sheet với email `client_email` trong key và cấp quyền **Editor**. Không đưa key vào Git.
 
+Tạo OAuth Client ID loại **Web application** để đăng nhập dashboard. Thêm callback `http://localhost:3030/auth/google/callback` vào **Authorized redirect URIs** (hoặc dùng callback HTTPS của domain khi deploy). Luồng đăng nhập chỉ yêu cầu scope `openid email`.
+
+Tạo `.auth/allowlist.json` từ `allowlist.example.json`, rồi điền email vào `owners` hoặc `viewers`. Owner có thể xóa lịch sử và gửi tin nhắn thử; viewer chỉ xem dashboard. `.auth/` đã được ignore khỏi Git. Nếu `AUTH_SESSION_SECRET` để trống, server tạo secret ngẫu nhiên trong `.auth/session-secret` để giữ phiên đăng nhập qua lần restart.
+
 Sau khi service account có quyền truy cập Sheet, task chỉ được ghi khi người dùng bấm **Confirm** trên card và `GOOGLE_SHEETS_WRITE_ENABLED=true`. Dashboard hiển thị trạng thái cấu hình và quyền truy cập của service account.
 
 Nếu dashboard báo chưa truy cập được Sheet, kiểm tra `GOOGLE_SHEETS_SPREADSHEET_ID` và share Sheet cho đúng `client_email` với quyền **Editor**. Nếu Google báo Sheets API chưa được bật, mở **APIs & Services → Library**, tìm **Google Sheets API** trong project của service account rồi bấm **Enable**.
@@ -94,20 +105,23 @@ Google Sheet dùng chín cột theo đúng thứ tự `ID`, `Task`, `PIC`, `Dead
 
 Hiện tại chế độ ghi Sheet vẫn tắt mặc định bằng `GOOGLE_SHEETS_WRITE_ENABLED=false`. Dashboard vẫn hiển thị bảng **Thông tin sau khi extract payload** realtime. Khi muốn bật ghi, đặt biến này thành `true` và restart server.
 
+Khi chạy local không cấu hình OAuth, có thể tạm dùng `AUTH_DISABLED=true` cùng `HOST=127.0.0.1`. Server từ chối `AUTH_DISABLED=true` trên host không phải loopback. Nếu bind ra mạng ngoài loopback, cần đặt `SEATALK_SIGNING_SECRET`; webhook SeaTalk vẫn là endpoint server-to-server và không dùng cookie đăng nhập.
+
 Nếu muốn dùng Compass trực tiếp (theo mẫu project `Claude`), đặt `TASK_EXTRACTOR=compass`, `COMPASS_API_KEY`, `COMPASS_BASE_URL` và `COMPASS_MODEL`.
 
 ## Endpoint
 
 - `GET /` — giao diện dashboard.
+- `GET /login` — trang đăng nhập.
+- `GET /healthz` — liveness, không cần đăng nhập.
 - `POST /callback` — SeaTalk callback URL.
 - `POST /seatalk/callback` và `POST /webhook/seatalk` — alias callback.
-- `GET /api/messages` — danh sách event đang nằm trong bộ nhớ.
-- `GET /api/stream` — kênh SSE để cập nhật dashboard realtime.
-- `GET /api/google/status` — trạng thái cấu hình service account và quyền truy cập Sheet.
-- `POST /api/test-message` — tạo một event mẫu local.
-- `DELETE /api/messages` — xóa lịch sử hiện tại.
+- `GET /auth/login` — bắt đầu Google sign-in; callback là `GET /auth/google/callback`.
+- `POST /auth/logout` — đăng xuất phiên hiện tại.
+- `GET /api/me`, `/api/messages`, `/api/stream`, `/api/health`, `/api/google/status` — cần phiên owner hoặc viewer.
+- `POST /api/test-message` và `DELETE /api/messages` — chỉ owner.
 
-`GET /api/health` trả thêm trạng thái extractor, outbound SeaTalk và Google Sheets (`taskExtractor`, `taskExtractionConfigured`, `seatalkConfigured`, `googleSheetsWriteEnabled`, `googleSheetsConfigured`, `googleSheetsAuthorized`, `googleServiceAccountEmail`).
+`GET /api/health` cần đăng nhập và trả trạng thái extractor, outbound SeaTalk và Google Sheets (`taskExtractor`, `taskExtractionConfigured`, `seatalkConfigured`, `googleSheetsWriteEnabled`, `googleSheetsConfigured`, `googleSheetsAuthorized`, `googleServiceAccountEmail`). Dùng `GET /healthz` cho liveness không cần đăng nhập.
 
 Lịch sử hiện chỉ lưu trong bộ nhớ và sẽ reset khi restart server; đây là chủ ý để bản đầu tập trung vào việc nhận và quan sát callback.
 

@@ -18,9 +18,15 @@
             <h1>SeaTalk inbox</h1>
           </div>
         </div>
-        <div class="connection-state" id="connectionState" data-state="connecting">
-          <span class="status-dot"></span>
-          <span id="connectionLabel">Đang kết nối</span>
+        <div class="topbar-actions">
+          <div class="user-session" id="sessionPanel" hidden>
+            <span id="userIdentity"></span>
+            <button class="ghost-button" id="logoutButton" type="button">Đăng xuất</button>
+          </div>
+          <div class="connection-state" id="connectionState" data-state="connecting">
+            <span class="status-dot"></span>
+            <span id="connectionLabel">Đang kết nối</span>
+          </div>
         </div>
       </header>
 
@@ -32,7 +38,7 @@
               <h2>Tin nhắn nhận từ bot</h2>
               <p class="intro-copy">Mọi callback từ SeaTalk sẽ xuất hiện ở đây ngay khi server nhận được.</p>
             </div>
-            <button class="ghost-button" id="clearButton" type="button">Xóa lịch sử</button>
+            <button class="ghost-button" id="clearButton" type="button" hidden>Xóa lịch sử</button>
           </div>
 
           <div class="metrics" aria-label="Tổng quan">
@@ -97,7 +103,7 @@
                 <span class="live-pill"><span class="status-dot"></span> LIVE</span>
                 <h3>Activity feed</h3>
               </div>
-              <button class="test-button" id="testButton" type="button"><span>＋</span> Gửi tin nhắn thử</button>
+              <button class="test-button" id="testButton" type="button" hidden><span>＋</span> Gửi tin nhắn thử</button>
             </div>
             <div class="feed" id="feed" aria-live="polite">
               <div class="empty-state" id="emptyState">

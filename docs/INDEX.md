@@ -4,7 +4,7 @@
 
 1. Read [the root agent guide](../AGENTS.md) for commands, conventions, and task lookup.
 2. Read [architecture](architecture.md) for module boundaries, process state, and concurrency.
-3. Read [flows](flows.md) for callback, confirmation, update, service-account, and dashboard behavior.
+3. Read [flows](flows.md) for callback, confirmation, update, service-account, login, and dashboard behavior.
 4. Read [extraction](extraction.md) before changing PIC, deadline, priority, prompt, or fixtures.
 5. Read [integrations and config](integrations-and-config.md) before touching APIs or credentials.
 6. Use [testing](testing.md), [gotchas](gotchas.md), and [git workflow](git-workflow.md) while changing code.
@@ -38,6 +38,10 @@
 | [../src/seatalk.js](../src/seatalk.js) | SeaTalk client and outbound text/card shapes | SeaTalkClient, buildConfirmationMessage, buildTaskClarificationMessage | Changing SeaTalk messages |
 | [../src/google-sheets.js](../src/google-sheets.js) | Google Sheets REST calls and row conversion/search | GoogleSheetsClient, buildTaskRow | Changing Sheets |
 | [../src/google-service-account.js](../src/google-service-account.js) | Service-account key loading and cached signed-token requests | GoogleServiceAccountTokenProvider | Changing Sheets credentials |
+| [../src/allowlist.js](../src/allowlist.js) | Reloadable owner/viewer allowlist | createAllowlist | Changing dashboard access |
+| [../src/session.js](../src/session.js) | Signed sliding session cookies and secret persistence | createSessionManager | Changing dashboard sessions |
+| [../src/google-login.js](../src/google-login.js) | State-bound Google login and verified-email allowlisting | createGoogleLogin | Changing login flow |
+| [../src/access-control.js](../src/access-control.js) | Route-role policy and request-origin checks | authorizeRequest | Changing access policy |
 | [../src/thread-sessions.js](../src/thread-sessions.js) | Thread tasks and clarification routing | createThreadSession, resolveTaskRoute, reopenTaskForConfirmation | Changing thread task behavior |
 | [../src/confirmation-auth.js](../src/confirmation-auth.js) | Creator, PIC, and clicker authorization | isConfirmationClickAuthorized, isTaskMessageUpdateAuthorized | Changing permissions |
 | [../src/confirmation-routing.js](../src/confirmation-routing.js) | SeaTalk callback value parser | parseConfirmationButtonValue | Changing interactive buttons |
@@ -52,6 +56,7 @@
 | [../test/fixtures/extraction-cases.json](../test/fixtures/extraction-cases.json) | Rule-evaluator expectations (46 cases currently) | message, deadline, priority, task | Changing extraction behavior |
 | [../test/eval-extract](../test/eval-extract) | Fixture evaluator CLI | --provider, --reference-date, --details | Measuring extraction changes |
 | [../public/app.js](../public/app.js) | Dashboard rendering and SSE handling | EventSource /api/stream | Changing dashboard behavior |
+| [../public/login.html](../public/login.html) | Self-contained public Google sign-in page | — | Changing login UI |
 | [../public/index.html](../public/index.html) | Dashboard structure | — | Changing dashboard controls or markup |
 | [../public/styles.css](../public/styles.css) | Dashboard presentation | — | Changing dashboard appearance |
 | [../package.json](../package.json) | Scripts and ESM package metadata | start, dev, test, eval:extract | Changing commands or dependencies |

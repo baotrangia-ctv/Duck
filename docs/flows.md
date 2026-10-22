@@ -128,18 +128,44 @@ error is recorded instead of messaging the Creator.
 4. GET /api/google/status checks spreadsheet metadata to confirm access and caches the result for
    60 seconds. A 403 prompts the operator to share the Sheet with the service-account email as
    Editor; a 404 prompts them to check the spreadsheet ID and sharing.
-5. The old Sheets connect/disconnect routes return 404. Google OAuth settings are reserved for
-   the dashboard-login feature.
+5. The old Sheets connect/disconnect routes return 404. Google OAuth is used only by dashboard
+   sign-in, with `openid email` scopes.
 
-## 8. Dashboard and SSE
+## 8. Allowlisted Google login and dashboard access
+
+1. `GET /auth/login` creates a 32-byte random state, stores it for ten minutes, places it in
+   the `alpha_oauth_state` HttpOnly/SameSite cookie, and redirects to Google with `openid email`
+   scopes. It does not request offline access or consent prompting.
+2. `GET /auth/google/callback` consumes state once and requires the query state and cookie state
+   to match. It exchanges the code, reads userinfo, requires `email_verified === true`, and checks
+   the email in `.auth/allowlist.json`.
+3. A successful allowlisted login sets a signed `alpha_session` cookie and redirects to `/`.
+   Failure redirects to `/login?error=<code>` without including an email or token. `POST /auth/logout`
+   requires a session and same-origin request, clears the cookie, and returns JSON.
+4. The session payload stores email and timestamps, not role. Every protected request verifies
+   the HMAC and looks up the email's current owner/viewer role. A removed email loses access and
+   an owner downgraded to viewer immediately loses owner-only actions. Sessions renew when less
+   than half their configured lifetime remains.
+5. `GET /`, dashboard static files, and viewer API routes require owner or viewer. Unauthenticated
+   browser HTML navigation redirects to `/login`; API requests return 401. Viewers receive 403
+   for `DELETE /api/messages` and `POST /api/test-message`; owners may use both.
+6. `AUTH_DISABLED=true` maps protected requests to `local@dev` with owner role and is accepted
+   only for loopback hosts. SeaTalk webhook aliases remain public and do not use dashboard
+   cookies. An empty signing secret accepts unsigned webhook requests, so a non-loopback bind
+   requires `SEATALK_SIGNING_SECRET` at startup.
+
+## 9. Dashboard and SSE
 
 1. GET /api/stream calls handleStream, registers the response in clients, and immediately sends
-   a snapshot packet containing messages.
+   a snapshot packet containing messages after the session/role check.
 2. addMessage broadcasts message packets. updateProcessing broadcasts processing packets with
    record id and processing state. DELETE /api/messages broadcasts clear.
-3. public/app.js handles snapshot by replacing state.messages; message prepends/caps at 100;
+3. public/app.js first calls `/api/me`, displays the email and role, and hides owner controls for
+   viewers. It handles snapshot by replacing state.messages; message prepends/caps at 100;
    processing replaces the matching record's processing object; clear empties the display.
-   On stream error it reconnects after 2.5 seconds and receives a new snapshot.
+4. The server checks session expiry and allowlist membership every 60 seconds while SSE is open,
+   ending the stream when access is revoked. On stream error the dashboard calls `/api/me` before
+   reconnecting; any API 401 redirects it to `/login`.
 
 ## Confirmation button-value grammar
 
