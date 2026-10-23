@@ -1,4 +1,4 @@
-# Alpha Intel · SeaTalk inbox
+# [Craftland] Duck · SeaTalk inbox
 
 Website local để nhận callback từ SeaTalk Open Platform Bot và hiển thị nội dung tin nhắn trên màn hình theo thời gian thực.
 

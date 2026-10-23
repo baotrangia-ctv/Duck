@@ -1593,7 +1593,7 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`Alpha Intel SeaTalk inbox: http://localhost:${port}`);
+  console.log(`[Craftland] Duck SeaTalk inbox: http://localhost:${port}`);
   console.log(`Server bind: ${host}:${port}`);
   console.log(`Webhook callback: http://localhost:${port}/callback`);
   if (signingSecret) console.log("SeaTalk signature verification: enabled");

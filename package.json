@@ -2,7 +2,7 @@
   "name": "alpha-intel-seatalk-inbox",
   "version": "1.0.0",
   "private": true,
-  "description": "SeaTalk bot webhook inbox for Alpha Intel",
+  "description": "SeaTalk bot webhook inbox for [Craftland] Duck",
   "type": "module",
   "scripts": {
     "start": "node server.js",
