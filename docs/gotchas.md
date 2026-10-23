@@ -40,6 +40,18 @@ Ordered roughly by blast radius.
   The code separates configuration, state, cookie, token, userinfo, verification, and allowlist
   failures without putting credentials in the redirect.
 
+## Google reports redirect_uri_mismatch
+
+- **What:** Google rejects the authorization request before the callback runs when the redirect
+  URI does not exactly match an Authorized redirect URI.
+- **Why:** Scheme, host, port, and path are compared exactly; the matching OAuth client must be
+  type Web application.
+- **Where:** The startup line `Google login: redirect URI sent to Google = ...` shows the value
+  sent by this server.
+- **Do:** Compare that value with the matching client's Authorized redirect URIs. Google's error
+  page **error details** shows the exact `redirect_uri` received. After changing the URI in Cloud
+  Console, allow a few minutes for the change to apply.
+
 ## README and current confirmation-card destination disagree
 
 - **What:** README describes an interactive card sent by DM plus text in the group thread and

@@ -97,7 +97,9 @@ Tạo OAuth Client ID loại **Web application** để đăng nhập dashboard. 
 
 Mở dashboard bằng đúng host và cổng trong `GOOGLE_OAUTH_REDIRECT_URI`. Trang `/login` tự chuyển sang Google và cho chọn tài khoản; nút đăng nhập vẫn dùng được nếu cần thử lại. Sau khi đăng xuất, trang đăng nhập sẽ đứng yên. Nếu đăng nhập lỗi, xem `Mã lỗi` trên trang và dòng `Google login:` trong log server để xác định bước cần kiểm tra.
 
-Tạo `.auth/allowlist.json` từ `allowlist.example.json`, rồi điền email vào `owners` hoặc `viewers`. Owner có thể xóa lịch sử và gửi tin nhắn thử; viewer chỉ xem dashboard. `.auth/` đã được ignore khỏi Git. Nếu `AUTH_SESSION_SECRET` để trống, server tạo secret ngẫu nhiên trong `.auth/session-secret` để giữ phiên đăng nhập qua lần restart.
+Nếu Google báo `redirect_uri_mismatch`, lỗi xuất hiện trên trang Google trước khi server nhận callback. So sánh dòng khởi động `Google login: redirect URI sent to Google = ...` với **Authorized redirect URIs** của OAuth Client ID loại **Web application** đang dùng trong `GOOGLE_OAUTH_CLIENT_ID`; scheme, host, port và path phải khớp chính xác. Mục **error details** trên trang lỗi của Google cho biết `redirect_uri` chính xác đã nhận. Thay đổi trong Cloud Console có thể mất vài phút mới có hiệu lực.
+
+Tạo `.auth/allowlist.json` từ `allowlist.example.json`, rồi điền email vào `owners` hoặc `viewers`. Owner có thể xóa lịch sử và gửi tin nhắn thử; viewer chỉ xem dashboard. `.auth/` đã được ignore khỏi Git. Nếu `AUTH_SESSION_SECRET` để trống, server tạo secret ngẫu nhiên trong `.auth/session-secret` để giữ phiên đăng nhập qua lần restart. Luồng local thông thường vẫn dùng allowlist và Google login với `GOOGLE_OAUTH_REDIRECT_URI` khớp chính xác; xem log server khi cần kiểm tra redirect URI.
 
 Sau khi service account có quyền truy cập Sheet, task chỉ được ghi khi người dùng bấm **Confirm** trên card và `GOOGLE_SHEETS_WRITE_ENABLED=true`. Dashboard hiển thị trạng thái cấu hình và quyền truy cập của service account.
 

@@ -9,6 +9,7 @@ import { GoogleServiceAccountTokenProvider } from "./src/google-service-account.
 import { createAllowlist } from "./src/allowlist.js";
 import { authorizeRequest, isLoopbackHost, isSameOrigin } from "./src/access-control.js";
 import { canonicalLoginRedirect, createGoogleLogin } from "./src/google-login.js";
+import { describeRedirectUri } from "./src/oauth-redirect.js";
 import {
   createSessionManager,
   getCookieValue,
@@ -89,6 +90,7 @@ const chatflowUrl = process.env.CHATFLOW_API_URL || "";
 const chatflowToken = process.env.CHATFLOW_API_TOKEN || "";
 const googleSheetsWriteEnabled = String(process.env.GOOGLE_SHEETS_WRITE_ENABLED || "false").toLowerCase() === "true";
 const googleOAuthRedirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || `http://localhost:${port}/auth/google/callback`;
+const googleOAuthRedirectExplicit = Boolean(process.env.GOOGLE_OAUTH_REDIRECT_URI);
 const googleServiceAccountKeyPath = resolve(root, process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || ".auth/google-service-account.json");
 const taskExtractor = createTaskExtractor({
   provider: process.env.TASK_EXTRACTOR || "auto",
@@ -119,6 +121,16 @@ const sessionManager = createSessionManager({
   secure: googleOAuthRedirectUri.startsWith("https://"),
 });
 if (!authDisabled) {
+  console.log(`Google login: redirect URI sent to Google = ${googleOAuthRedirectUri} (phải nằm trong "Authorized redirect URIs" của OAuth client).`);
+  const redirectDescription = describeRedirectUri({
+    redirectUri: googleOAuthRedirectUri,
+    port,
+    host,
+    explicit: googleOAuthRedirectExplicit,
+  });
+  for (const warning of redirectDescription.warnings) console.warn(`Google login: ${warning}`);
+  console.log("Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs (loại Web application) → Authorized redirect URIs.");
+
   const missing = [
     !process.env.GOOGLE_OAUTH_CLIENT_ID && "GOOGLE_OAUTH_CLIENT_ID",
     !process.env.GOOGLE_OAUTH_CLIENT_SECRET && "GOOGLE_OAUTH_CLIENT_SECRET",
