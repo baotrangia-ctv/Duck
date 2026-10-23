@@ -46,13 +46,13 @@ no CORS headers.
 |---|---|---|---|
 | GET | / | Serve dashboard index | Owner or viewer session |
 | GET | /<static path> | Serve a file from public/ | Owner or viewer session |
-| GET | /login, /login.html | Serve public login page | Public |
+| GET | /login, /login.html | Serve public login page; auto-start unless error or loggedout=1 | Public |
 | POST | /callback | SeaTalk callback | Public; optional Signature header check |
 | POST | /seatalk/callback | Callback alias | Public; optional Signature header check |
 | POST | /webhook/seatalk | Callback alias | Public; optional Signature header check |
 | GET | /healthz | Liveness response | Public |
-| GET | /auth/login | Start Google sign-in | Public |
-| GET | /auth/google/callback | Complete Google sign-in | Public; one-time state and cookie |
+| GET | /auth/login | Redirect to configured callback origin if Host differs, then start Google sign-in | Public |
+| GET | /auth/google/callback | Complete Google sign-in | Public; signed ten-minute state and matching cookie |
 | POST | /auth/logout | Clear current session | Owner or viewer session; same-origin |
 | GET | /api/me | Current account and role | Owner or viewer session |
 | GET | /api/health | Runtime and integration status | Owner or viewer session |
@@ -133,6 +133,24 @@ up on every request, so edits take effect without restart. Missing or malformed 
 access; after a valid load, an invalid edit keeps the last valid list until a valid replacement
 is saved. The signed session cookie contains email and timestamps, not role. It renews when less
 than half its lifetime remains. HTTPS redirect URIs add the Secure cookie flag.
+
+Opening `/login` continues to Google automatically and requests account selection. Errors and
+logout keep the login page visible with a manual retry button. OAuth state is signed with the
+persistent session secret and bound to an HttpOnly `/auth` cookie. Open the app on the same host
+and port as `GOOGLE_OAUTH_REDIRECT_URI`; `/auth/login` redirects to that origin if needed.
+Startup warns when the OAuth client ID or secret is missing (except with `AUTH_DISABLED=true`).
+The `Google login:` log line has the error code and safe provider detail.
+
+| `/login?error=` | Cause to check |
+|---|---|
+| `config` | Missing OAuth client ID, client secret, or redirect URI |
+| `cancelled` | Google returned an OAuth error or the user cancelled |
+| `state` | Missing, expired, or invalid signed state; check persistent session secret |
+| `cookie` | OAuth state cookie missing or different; check browser cookies and callback host |
+| `token` | Token exchange failed; check OAuth client credentials and authorized redirect URI |
+| `userinfo` | Google userinfo request failed or returned invalid JSON |
+| `unverified` | Google email is missing or unverified |
+| `forbidden` | Verified email is absent from the allowlist |
 
 `AUTH_DISABLED=true` provides a local owner identity (`local@dev`) only when HOST is
 `127.0.0.1`, `localhost`, or `::1`. If AUTH_SESSION_SECRET is unset, the server writes a random

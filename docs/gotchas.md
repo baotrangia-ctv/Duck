@@ -30,6 +30,16 @@ Ordered roughly by blast radius.
 - **Do:** Keep `.auth/` private and persistent. If you set `AUTH_SESSION_SECRET`, preserve the
   same value between restarts.
 
+## Google login host and error diagnostics
+
+- **What:** OAuth state uses a host-bound cookie and a signed ten-minute value. Open the app on
+  the host and port in `GOOGLE_OAUTH_REDIRECT_URI`; `/auth/login` canonicalizes other hosts.
+- **Why:** A callback on a different host cannot receive the state cookie. A changed session
+  secret also invalidates a state already issued before restart.
+- **Do:** Check `/login?error=<code>` and the matching `Google login:` server log line first.
+  The code separates configuration, state, cookie, token, userinfo, verification, and allowlist
+  failures without putting credentials in the redirect.
+
 ## README and current confirmation-card destination disagree
 
 - **What:** README describes an interactive card sent by DM plus text in the group thread and

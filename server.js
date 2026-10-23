@@ -8,7 +8,7 @@ import { GoogleSheetsClient } from "./src/google-sheets.js";
 import { GoogleServiceAccountTokenProvider } from "./src/google-service-account.js";
 import { createAllowlist } from "./src/allowlist.js";
 import { authorizeRequest, isLoopbackHost, isSameOrigin } from "./src/access-control.js";
-import { createGoogleLogin } from "./src/google-login.js";
+import { canonicalLoginRedirect, createGoogleLogin } from "./src/google-login.js";
 import {
   createSessionManager,
   getCookieValue,
@@ -118,10 +118,19 @@ const sessionManager = createSessionManager({
   ttlDays: process.env.AUTH_SESSION_TTL_DAYS || "30",
   secure: googleOAuthRedirectUri.startsWith("https://"),
 });
+if (!authDisabled) {
+  const missing = [
+    !process.env.GOOGLE_OAUTH_CLIENT_ID && "GOOGLE_OAUTH_CLIENT_ID",
+    !process.env.GOOGLE_OAUTH_CLIENT_SECRET && "GOOGLE_OAUTH_CLIENT_SECRET",
+    !googleOAuthRedirectUri && "GOOGLE_OAUTH_REDIRECT_URI",
+  ].filter(Boolean);
+  if (missing.length) console.warn(`Google login: config missing ${missing.join(", ")}`);
+}
 const googleLogin = createGoogleLogin({
   clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
   clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
   redirectUri: googleOAuthRedirectUri,
+  stateSecret: authSessionSecret,
   allowlist: authAllowlist,
   sessionManager,
 });
@@ -1457,6 +1466,11 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && pathname === "/auth/login") {
+    const canonical = canonicalLoginRedirect(getHeader(request, "host"), googleOAuthRedirectUri);
+    if (canonical) {
+      redirect(response, canonical);
+      return;
+    }
     const result = googleLogin.startLogin();
     redirect(response, result.location, result.cookies);
     return;

@@ -95,6 +95,8 @@ Trong Google Cloud, bật **Google Sheets API**, tạo service account rồi t�
 
 Tạo OAuth Client ID loại **Web application** để đăng nhập dashboard. Thêm callback `http://localhost:3030/auth/google/callback` vào **Authorized redirect URIs** (hoặc dùng callback HTTPS của domain khi deploy). Luồng đăng nhập chỉ yêu cầu scope `openid email`.
 
+Mở dashboard bằng đúng host và cổng trong `GOOGLE_OAUTH_REDIRECT_URI`. Trang `/login` tự chuyển sang Google và cho chọn tài khoản; nút đăng nhập vẫn dùng được nếu cần thử lại. Sau khi đăng xuất, trang đăng nhập sẽ đứng yên. Nếu đăng nhập lỗi, xem `Mã lỗi` trên trang và dòng `Google login:` trong log server để xác định bước cần kiểm tra.
+
 Tạo `.auth/allowlist.json` từ `allowlist.example.json`, rồi điền email vào `owners` hoặc `viewers`. Owner có thể xóa lịch sử và gửi tin nhắn thử; viewer chỉ xem dashboard. `.auth/` đã được ignore khỏi Git. Nếu `AUTH_SESSION_SECRET` để trống, server tạo secret ngẫu nhiên trong `.auth/session-secret` để giữ phiên đăng nhập qua lần restart.
 
 Sau khi service account có quyền truy cập Sheet, task chỉ được ghi khi người dùng bấm **Confirm** trên card và `GOOGLE_SHEETS_WRITE_ENABLED=true`. Dashboard hiển thị trạng thái cấu hình và quyền truy cập của service account.

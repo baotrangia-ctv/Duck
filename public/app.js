@@ -250,7 +250,7 @@ $("#copyButton").addEventListener("click", async () => {
 
 $("#logoutButton").addEventListener("click", async () => {
   const response = await apiFetch("/auth/logout", { method: "POST" });
-  if (response.ok) window.location.assign("/login");
+  if (response.ok) window.location.assign("/login?loggedout=1");
 });
 
 async function initializeDashboard() {

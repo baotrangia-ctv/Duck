@@ -15,6 +15,7 @@
       h1 { margin: 0; font-size: 26px; letter-spacing: -.04em; }
       p { margin: 14px 0 24px; color: #a6b8cd; font-size: 14px; line-height: 1.6; }
       .error { min-height: 22px; margin: 0 0 18px; color: #ff9daa; }
+      .error-code { margin: -12px 0 18px; color: #8ca3bd; font-size: 11px; }
       a { display: grid; min-height: 46px; place-items: center; border: 1px solid rgba(77, 224, 188, .38); border-radius: 9px; color: #061b1a; background: #4de0bc; font-size: 14px; font-weight: 750; text-decoration: none; transition: background .18s ease; }
       a:hover { background: #87efd6; }
       .note { margin: 18px 0 0; color: #7389a3; font-size: 11px; text-align: center; }
@@ -27,16 +28,33 @@
       <h1>Đăng nhập Alpha Intel</h1>
       <p>Đăng nhập bằng tài khoản Google đã được cấp quyền truy cập.</p>
       <p class="error" id="loginError" role="alert" aria-live="polite"></p>
+      <p class="error-code" id="loginErrorCode"></p>
       <a href="/auth/login">Đăng nhập bằng Google</a>
+      <noscript><a href="/auth/login">Tiếp tục với Google</a></noscript>
       <p class="note">Chỉ tài khoản trong danh sách cho phép mới có thể truy cập.</p>
     </main>
     <script>
-      const messages = {
-        forbidden: "Tài khoản này chưa được cấp quyền truy cập.",
+      const messages = Object.freeze({
+        config: "Đăng nhập Google chưa được cấu hình trên server. Liên hệ người quản trị.",
         cancelled: "Bạn đã hủy đăng nhập.",
-      };
-      const error = new URLSearchParams(window.location.search).get("error");
-      if (error) document.querySelector("#loginError").textContent = messages[error] || "Đăng nhập không thành công. Vui lòng thử lại.";
+        state: "Phiên đăng nhập đã hết hạn hoặc server vừa khởi động lại. Vui lòng thử lại.",
+        cookie: "Trình duyệt không gửi cookie đăng nhập. Hãy mở trang bằng đúng địa chỉ được cấu hình rồi thử lại.",
+        token: "Google từ chối mã đăng nhập. Người quản trị cần kiểm tra OAuth Client ID/Secret và Redirect URI.",
+        userinfo: "Không lấy được thông tin tài khoản từ Google. Vui lòng thử lại.",
+        unverified: "Email Google chưa được xác minh.",
+        forbidden: "Tài khoản này chưa được cấp quyền truy cập.",
+      });
+      const query = new URLSearchParams(window.location.search);
+      if (query.has("error")) {
+        const code = query.get("error");
+        document.querySelector("#loginError").textContent = Object.hasOwn(messages, code)
+          ? messages[code] : "Đăng nhập không thành công. Vui lòng thử lại.";
+        if (Object.hasOwn(messages, code)) document.querySelector("#loginErrorCode").textContent = `Mã lỗi: ${code}`;
+      } else if (query.has("loggedout")) {
+        if (query.get("loggedout") === "1") document.querySelector("#loginError").textContent = "Bạn đã đăng xuất.";
+      } else {
+        window.location.replace("/auth/login");
+      }
     </script>
   </body>
 </html>

@@ -133,15 +133,20 @@ error is recorded instead of messaging the Creator.
 
 ## 8. Allowlisted Google login and dashboard access
 
-1. `GET /auth/login` creates a 32-byte random state, stores it for ten minutes, places it in
-   the `alpha_oauth_state` HttpOnly/SameSite cookie, and redirects to Google with `openid email`
-   scopes. It does not request offline access or consent prompting.
-2. `GET /auth/google/callback` consumes state once and requires the query state and cookie state
-   to match. It exchanges the code, reads userinfo, requires `email_verified === true`, and checks
-   the email in `.auth/allowlist.json`.
+1. `/login` immediately continues to `/auth/login` unless an error or logout message is present.
+   `/auth/login` first redirects to the origin of `GOOGLE_OAUTH_REDIRECT_URI` when its Host differs.
+   It signs a ten-minute state with the persistent session secret, binds it to the
+   `alpha_oauth_state` HttpOnly/SameSite cookie on `/auth`, and redirects to Google with
+   `openid email` scopes and `prompt=select_account`. It requests neither offline access nor consent.
+2. `GET /auth/google/callback` verifies the state signature and expiry, then requires the query
+   state and cookie state to match. It exchanges the code, reads userinfo, requires verified email
+   (`true` or `"true"`), and checks the email in `.auth/allowlist.json`. State survives a server
+   restart when the session secret remains stable.
 3. A successful allowlisted login sets a signed `alpha_session` cookie and redirects to `/`.
-   Failure redirects to `/login?error=<code>` without including an email or token. `POST /auth/logout`
-   requires a session and same-origin request, clears the cookie, and returns JSON.
+   Failure redirects to `/login?error=<code>` with one of `config`, `cancelled`, `state`, `cookie`,
+   `token`, `userinfo`, `unverified`, or `forbidden`, without including an email or token.
+   `POST /auth/logout` requires a session and same-origin request, clears the cookie, and returns
+   JSON; the dashboard then opens `/login?loggedout=1`.
 4. The session payload stores email and timestamps, not role. Every protected request verifies
    the HMAC and looks up the email's current owner/viewer role. A removed email loses access and
    an owner downgraded to viewer immediately loses owner-only actions. Sessions renew when less

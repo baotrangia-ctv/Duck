@@ -21,7 +21,7 @@ compares fixture expectations for deadline, priority, and task.
 | test/allowlist.test.js | Missing/invalid files, mtime reloads, email normalization, and role precedence |
 | test/session.test.js | HMAC cookies, tampering/expiry, renewal threshold, flags, and secret persistence |
 | test/access-control.test.js | Public/viewer/owner route matrix, HTML redirects, unknown routes, loopback and same-origin policy |
-| test/google-login.test.js | OAuth state/cookie binding, expiry, verified email, allowlist, and session issuance |
+| test/google-login.test.js | Signed OAuth state, restart/expiry, cookie binding, error codes and safe logs, host redirect, login-page behavior, verified email, allowlist, and session issuance |
 | test/task-acknowledgement.test.js | PIC-only acknowledgement, Sheet re-read/write, UpdatedAt, idempotence, final statuses, and card update |
 | test/sheet-task-updates.test.js | Update-intent/status parsing, A:I row conversion and Creator preservation, Sheet client lookup, update cards, PIC/Creator authorization and PIC notification routing |
 | test/thread-sessions.test.js | Session/task routing, quoted messages, clarification choices, five-task limit, short IDs, reopening |
@@ -30,7 +30,8 @@ compares fixture expectations for deadline, priority, and task.
 
 There is no direct test import of server.js. HTTP route handling, webhook signature validation,
 deduplication, SSE lifecycle, and orchestration across modules are not covered by a server-level
-test suite; the final login change includes a localhost HTTP smoke check.
+test suite. A local HTTP smoke check remains useful before deployment when credential-file
+access is permitted.
 
 ## Fakes and fixture workflow
 
@@ -58,6 +59,7 @@ test suite; the final login change includes a localhost HTTP smoke check.
 | Authorization | confirmation-auth.js plus allowlist/session/access-control/login suites; inspect server call sites |
 | Sheet columns, row IDs, or service-account auth | google-sheets.js, google-service-account.js, integrations docs, and client tests; treat contract changes as breaking |
 | HTTP/SSE flow | server.js and public/app.js; current tests do not exercise server.js directly |
+| Google login | google-login.test.js covers signed state across instances, error codes and safe logs, account choice, host matching, and login-page messages; HTTP route wiring still needs a local smoke check |
 | Environment names/defaults | .env.example, server.js reads, integrations docs; treat runtime-changing changes as breaking |
 
 ## Local HTTP smoke check
