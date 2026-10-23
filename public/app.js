@@ -12,10 +12,13 @@ async function apiFetch(input, options) {
 function applyUser(user) {
   state.user = user;
   const sessionPanel = $("#sessionPanel");
+  const authDisabled = Boolean(user?.authDisabled);
   sessionPanel.hidden = !user;
+  $("#authDisabledBanner").hidden = !authDisabled;
+  $("#logoutButton").hidden = authDisabled;
   if (user) {
     const roleLabel = user.role === "owner" ? "Chủ sở hữu" : "Người xem";
-    $("#userIdentity").textContent = `${user.email} · ${roleLabel}`;
+    $("#userIdentity").textContent = authDisabled ? "local@dev (không cần đăng nhập)" : `${user.email} · ${roleLabel}`;
   }
   const owner = user?.role === "owner";
   $("#clearButton").hidden = !owner;

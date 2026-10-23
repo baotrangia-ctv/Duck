@@ -52,6 +52,15 @@ Ordered roughly by blast radius.
   page **error details** shows the exact `redirect_uri` received. After changing the URI in Cloud
   Console, allow a few minutes for the change to apply.
 
+## Dashboard shows local@dev
+
+- **What:** The dashboard is running with `AUTH_DISABLED=true`; requests are represented by the
+  local owner `local@dev` without a Google session.
+- **Why:** This bypass is intended only as a temporary escape hatch for automated local checks.
+- **Do:** In PowerShell run `Remove-Item Env:AUTH_DISABLED -ErrorAction SilentlyContinue`, delete
+  the `AUTH_DISABLED` line from `.env` if present without copying its value elsewhere, then restart
+  the server.
+
 ## README and current confirmation-card destination disagree
 
 - **What:** README describes an interactive card sent by DM plus text in the group thread and

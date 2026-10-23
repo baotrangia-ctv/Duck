@@ -93,7 +93,7 @@ SEATALK_API_BASE_URL=https://openapi.seatalk.io
 
 Trong Google Cloud, bật **Google Sheets API**, tạo service account rồi tải JSON key vào `.auth/google-service-account.json` (hoặc đường dẫn đặt trong `GOOGLE_SERVICE_ACCOUNT_KEY_PATH`). Share Google Sheet với email `client_email` trong key và cấp quyền **Editor**. Không đưa key vào Git.
 
-Tạo OAuth Client ID loại **Web application** để đăng nhập dashboard. Thêm callback `http://localhost:3030/auth/google/callback` vào **Authorized redirect URIs** (hoặc dùng callback HTTPS của domain khi deploy). Luồng đăng nhập chỉ yêu cầu scope `openid email`.
+Tạo OAuth Client ID loại **Web application** để đăng nhập dashboard. Thêm callback `http://localhost:3030/auth/google/callback` vào **Authorized redirect URIs** (hoặc dùng callback HTTPS của domain khi deploy) và đặt cùng giá trị trong `GOOGLE_OAUTH_REDIRECT_URI`. Luồng đăng nhập chỉ yêu cầu scope `openid email`.
 
 Mở dashboard bằng đúng host và cổng trong `GOOGLE_OAUTH_REDIRECT_URI`. Trang `/login` tự chuyển sang Google và cho chọn tài khoản; nút đăng nhập vẫn dùng được nếu cần thử lại. Sau khi đăng xuất, trang đăng nhập sẽ đứng yên. Nếu đăng nhập lỗi, xem `Mã lỗi` trên trang và dòng `Google login:` trong log server để xác định bước cần kiểm tra.
 
@@ -109,7 +109,9 @@ Google Sheet dùng chín cột theo đúng thứ tự `ID`, `Task`, `PIC`, `Dead
 
 Hiện tại chế độ ghi Sheet vẫn tắt mặc định bằng `GOOGLE_SHEETS_WRITE_ENABLED=false`. Dashboard vẫn hiển thị bảng **Thông tin sau khi extract payload** realtime. Khi muốn bật ghi, đặt biến này thành `true` và restart server.
 
-Khi chạy local không cấu hình OAuth, có thể tạm dùng `AUTH_DISABLED=true` cùng `HOST=127.0.0.1`. Server từ chối `AUTH_DISABLED=true` trên host không phải loopback. Nếu bind ra mạng ngoài loopback, cần đặt `SEATALK_SIGNING_SECRET`; webhook SeaTalk vẫn là endpoint server-to-server và không dùng cookie đăng nhập.
+Dashboard local thông thường vẫn dùng allowlist và Google login; cấu hình `.auth/allowlist.json`, OAuth Client ID loại **Web application** và `GOOGLE_OAUTH_REDIRECT_URI` như hướng dẫn trên. `AUTH_DISABLED=true` chỉ là lối tắt tạm thời cho kiểm tra tự động trên máy local; biến này bỏ qua đăng nhập, chỉ được phép với `HOST` loopback và server sẽ hiện cảnh báo rõ ràng. Nếu bind ra mạng ngoài loopback, cần đặt `SEATALK_SIGNING_SECRET`; webhook SeaTalk vẫn là endpoint server-to-server và không dùng cookie đăng nhập.
+
+Nếu dashboard hiển thị `local@dev` hoặc banner đỏ, `AUTH_DISABLED=true` đang được bật. Trong PowerShell chạy `Remove-Item Env:AUTH_DISABLED -ErrorAction SilentlyContinue`, xóa dòng `AUTH_DISABLED` khỏi `.env` nếu có rồi restart server. Không dán giá trị biến này vào nơi khác.
 
 Nếu muốn dùng Compass trực tiếp (theo mẫu project `Claude`), đặt `TASK_EXTRACTOR=compass`, `COMPASS_API_KEY`, `COMPASS_BASE_URL` và `COMPASS_MODEL`.
 

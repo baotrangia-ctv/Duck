@@ -30,6 +30,8 @@ button { cursor: pointer; }
 code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 
 .app-shell { width: min(1440px, calc(100% - 64px)); margin: 0 auto; }
+.auth-disabled-banner { margin-top: 18px; padding: 12px 16px; border: 1px solid rgba(255, 124, 137, .58); border-radius: 10px; color: #fff2f3; background: rgba(112, 31, 46, .92); font-size: 13px; font-weight: 750; line-height: 1.5; }
+.auth-disabled-banner[hidden], .user-session [hidden] { display: none; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 28px 0 38px; border-bottom: 1px solid var(--line); }
 .brand-lockup { display: flex; align-items: center; gap: 14px; }
 .brand-mark { display: grid; grid-template-columns: repeat(3, 5px); align-items: end; gap: 4px; width: 34px; height: 34px; padding: 8px; border: 1px solid rgba(77, 224, 188, .34); border-radius: 11px; background: rgba(77, 224, 188, .08); }

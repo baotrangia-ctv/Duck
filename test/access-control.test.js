@@ -44,6 +44,33 @@ test("unauthenticated HTML navigation redirects while API requests return 401", 
   assert.equal(authorizeRequest({ method: "GET", pathname: "/api/messages" }), "unauthorized");
 });
 
+test("login stays required by default while webhook, health, and login routes stay public", () => {
+  const viewerRoutes = [
+    ["GET", "/api/me"],
+    ["GET", "/api/messages"],
+    ["GET", "/api/stream"],
+    ["GET", "/api/health"],
+    ["GET", "/api/google/status"],
+    ["POST", "/auth/logout"],
+  ];
+  const ownerRoutes = [["DELETE", "/api/messages"], ["POST", "/api/test-message"]];
+
+  for (const authDisabled of [undefined, false]) {
+    for (const [method, pathname] of [...viewerRoutes, ...ownerRoutes]) {
+      assert.equal(authorizeRequest({ method, pathname, authDisabled }), "unauthorized");
+    }
+    assert.equal(authorizeRequest({ method: "GET", pathname: "/", accept: "text/html", authDisabled }), "redirect-login");
+    assert.equal(authorizeRequest({ method: "GET", pathname: "/index.html", accept: "text/html", authDisabled }), "redirect-login");
+
+    for (const pathname of ["/healthz", "/login", "/login.html", "/auth/login", "/auth/google/callback"]) {
+      assert.equal(authorizeRequest({ method: "GET", pathname, authDisabled }), "allow");
+    }
+    for (const pathname of ["/callback", "/seatalk/callback", "/webhook/seatalk"]) {
+      assert.equal(authorizeRequest({ method: "POST", pathname, authDisabled }), "allow");
+    }
+  }
+});
+
 test("static files require a role; unknown API routes are consistently denied", () => {
   assert.equal(authorizeRequest({ method: "GET", pathname: "/styles.css", role: "viewer" }), "allow");
   assert.equal(authorizeRequest({ method: "GET", pathname: "/public/missing.js", role: "owner" }), "allow");

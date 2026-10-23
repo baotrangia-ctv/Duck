@@ -19,12 +19,14 @@ Requirements: Node.js 18+ (README requirement; package.json does not declare eng
     npm run eval:extract -- --provider rules
 
 The rules-only extractor needs no external credentials. To run the dashboard in PowerShell
-without an LLM provider, set $env:TASK_EXTRACTOR = "rules" before npm start. Create
-`.auth/allowlist.json` from `allowlist.example.json` and configure the Google OAuth client for
-login. For a trusted local-only session, set `$env:HOST = "127.0.0.1"` and
-`$env:AUTH_DISABLED = "true"`. POST http://localhost:3030/api/test-message to create a local
-sample; it extracts fields without sending a confirmation card or writing a Sheet row. The
-default server bind is 0.0.0.0:3030 and requires `SEATALK_SIGNING_SECRET`.
+without an LLM provider, set `$env:TASK_EXTRACTOR = "rules"` before `npm start`. For normal
+local dashboard access, create `.auth/allowlist.json` from `allowlist.example.json`, configure a
+Web application Google OAuth client, and set `GOOGLE_OAUTH_REDIRECT_URI` to the exact callback
+registered there (by default `http://localhost:3030/auth/google/callback`). `AUTH_DISABLED=true`
+is a temporary escape hatch for automated local checks only; it bypasses login and is accepted
+only with a loopback `HOST`. POST http://localhost:3030/api/test-message to create a local sample;
+it extracts fields without sending a confirmation card or writing a Sheet row. The default
+server bind is 0.0.0.0:3030 and requires `SEATALK_SIGNING_SECRET`.
 
 ## Repo map
 
@@ -88,7 +90,8 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
   are not sent; mutating dashboard requests validate Origin against Host.
 - SeaTalk webhook routes remain public and are protected only when SEATALK_SIGNING_SECRET is
   set. An empty secret accepts unsigned callbacks; non-loopback binds require a nonempty secret.
-- AUTH_DISABLED=true works only with a loopback HOST; never expose it on an untrusted network.
+- AUTH_DISABLED=true is only for temporary automated local checks and works only with a loopback
+  HOST; never expose it on an untrusted network.
 
 ## Git workflow & commit convention
 

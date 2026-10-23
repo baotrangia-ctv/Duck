@@ -73,6 +73,12 @@ if (authDisabled && !isLoopbackHost(host)) {
   console.error("AUTH_DISABLED=true is allowed only when HOST is 127.0.0.1, localhost, or ::1.");
   process.exit(1);
 }
+if (authDisabled) {
+  console.warn([
+    "CẢNH BÁO: AUTH_DISABLED=true — dashboard và API đang mở, đăng nhập với local@dev. Gỡ biến này để bật đăng nhập Google.",
+    "Chỉ dùng chế độ này cho kiểm tra tự động trên máy local.",
+  ].join("\n"));
+}
 if (!signingSecret) {
   console.warn("WARNING: SEATALK_SIGNING_SECRET is empty; the SeaTalk webhook accepts unsigned requests.");
   if (!isLoopbackHost(host)) {
@@ -1473,6 +1479,10 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && (pathname === "/login" || pathname === "/login.html")) {
+    if (authDisabled) {
+      redirect(response, "/");
+      return;
+    }
     await serveStatic("/login.html", response);
     return;
   }
@@ -1501,7 +1511,12 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && pathname === "/api/me") {
-    sendJson(response, 200, { ok: true, email: request.auth.email, role: request.auth.role });
+    sendJson(response, 200, {
+      ok: true,
+      email: request.auth.email,
+      role: request.auth.role,
+      ...(authDisabled ? { authDisabled: true } : {}),
+    });
     return;
   }
 
