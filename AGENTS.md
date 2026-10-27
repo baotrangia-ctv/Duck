@@ -81,7 +81,12 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
 ## Always / Never
 
 - Keep user-facing bot copy in Vietnamese. Write agent documentation in English.
-- Never read, print, or commit .env, .auth/, .oauth/, or any service-account key. Use .env.example for names.
+- Never print or commit .env, .auth/, .oauth/, or any service-account key. Read only the needed
+  keys/files within user-authorized configuration maintenance or deployment work; otherwise
+  use .env.example for names. Preserve authorization already granted in the current chat.
+- For Demo System ZIP deployment or deployed-integration diagnosis, read the project skill
+  [.agents/skills/deploy-duck/SKILL.md](.agents/skills/deploy-duck/SKILL.md). Prepare the complete
+  selected runtime configuration together; do not deploy integrations one credential at a time.
 - Keep rules/*.md, deterministic extraction code, EXTRACTION_PROMPT examples, fixtures, and
   tests aligned. Rule files are loaded when task-extractor.js is imported; restart the server.
 - Preserve the Google Sheet A–I contract, task button-value grammar, endpoint meanings, and
@@ -121,6 +126,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/flows.md](docs/flows.
 | Change Sheet writes or service-account auth | src/google-sheets.js, src/google-service-account.js and server.js; see docs/integrations-and-config.md |
 | Change dashboard or SSE | public/app.js and server.js handleStream/broadcast |
 | Add extraction coverage | test/fixtures/extraction-cases.json, test/task-extractor.test.js, docs/testing.md |
+| Deploy to Demo System or audit deployment configuration | .agents/skills/deploy-duck/SKILL.md; docs/integrations-and-config.md |
 
 ## Doc index
 

@@ -34,6 +34,27 @@ Defaults below distinguish the runtime fallback from the value prefilled in .env
 | Auth | AUTH_SESSION_TTL_DAYS | 30 | No | Sliding session lifetime |
 | Auth | AUTH_DISABLED | false | No | Only exact `true` disables auth; loopback HOST required |
 
+## Environment maintenance and deployment profiles
+
+The table above is the supported runtime inventory. A variable is not obsolete merely because
+it is empty or unused by the currently selected extractor. `CHATFLOW_*`, `COMPASS_*`, holiday
+configuration, auth lifetime/path overrides and SeaTalk's pre-issued-token alternative remain
+supported. App ID/Secret is preferred for token refresh; the deploy packager omits a pre-issued
+token when that pair is available.
+
+`GOOGLE_OAUTH_TOKEN_PATH` is retired: Sheets now use a service-account key and dashboard login
+does not persist OAuth tokens. It is not read by the runtime and should be removed from local
+`.env`; do not rename it into a service-account path or delete `.oauth/` files as part of cleanup.
+The environment example contains no other retired runtime variables.
+
+For future ZIP deploys use the [project deployment skill](../.agents/skills/deploy-duck/SKILL.md).
+Its offline PowerShell packager validates all required integration inputs before creating a ZIP,
+maps only the selected credential files into `.auth/`, and includes only provider credentials
+for the explicitly chosen extractor. It overrides the public callback/HOST/platform port in
+the ZIP without changing local development settings. Build it only within authorized credential
+handling scope; it makes no network calls and does not deploy. Keep the output outside Git and
+delete it after upload. An uploaded archive must never be a public download artifact.
+
 ## HTTP endpoints
 
 Dashboard and API routes require a signed session for an account in the current allowlist.

@@ -27,6 +27,7 @@ compares fixture expectations for deadline, priority, and task.
 | test/seatalk-reminder.test.js | Exact reminder/DONE cards, additive callback parsing, documented contacts response, positive email cache, employee statuses/ambiguity and API code 103 |
 | test/task-done.test.js | PIC-only status CAS, UpdatedAt, already DONE, gates, missing row, CAS miss, three concurrent clicks, fallback DM and retry |
 | test/server-reminder.test.js | Isolated server orchestration: reminder interception, skipSheet dry run, thread filter, old routes and DONE webhook dispatch |
+| test/deploy-package.test.js | Offline Windows ZIP packaging with fake configuration, complete integration inputs, path remapping, provider selection, blocked unsafe/missing inputs and environment-example inventory |
 | test/sheet-task-updates.test.js | Update-intent/status parsing, A:I row conversion and Creator preservation, Sheet client lookup, update cards, PIC/Creator authorization and PIC notification routing |
 | test/thread-sessions.test.js | Session/task routing, quoted messages, clarification choices, five-task limit, short IDs, reopening |
 | test/fixtures/extraction-cases.json | 46 input messages with deadline, priority, and task expectations |

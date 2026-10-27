@@ -23,6 +23,7 @@
 | [testing.md](testing.md) | Test commands, suites, fakes, and coverage gaps | Before and after code changes |
 | [gotchas.md](gotchas.md) | High-impact traps and known source/spec mismatches | Before implementation or deployment |
 | [git-workflow.md](git-workflow.md) | Binding branch, commit, and pre-commit rules | Before every commit |
+| [Deployment skill](../.agents/skills/deploy-duck/SKILL.md) | Demo System ZIP packaging, complete configuration preflight, integration diagnostics | Deploying or diagnosing the hosted bot |
 | [codex-prompt-agent-docs.md](codex-prompt-agent-docs.md) | Authoring prompt for this documentation set | Revising the agent-doc requirements |
 | [../src/AGENTS.md](../src/AGENTS.md) and [../src/CLAUDE.md](../src/CLAUDE.md) | Source-module local rules and Claude import | Changing src modules |
 | [../rules/AGENTS.md](../rules/AGENTS.md) and [../rules/CLAUDE.md](../rules/CLAUDE.md) | Extraction policy editing rules and Claude import | Changing rules/*.md |
