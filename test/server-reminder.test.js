@@ -94,3 +94,32 @@ test("webhook dispatches task_done to the DONE handler", async () => {
   await handler({}, {});
   assert.deepEqual(calls, [{ value: "task:done:12", click: record }]);
 });
+
+test("webhook logs distinguish accepted, verification and rejected events without recording private payloads", async () => {
+  for (const scenario of ["accepted", "verification", "signature_missing", "signature_mismatch", "invalid_json", "body_rejected"]) {
+    const logs = [], responses = [], records = [];
+    const payload = {
+      event_type: scenario === "verification" ? "event_verification" : "new_mentioned_message_received_from_group_chat",
+      event: { text: { content: "private-message-content" }, email: "private-email@example.com" },
+    };
+    const handler = serverFunction("handleWebhook", "serveStatic", {
+      console: { info: (...args) => logs.push(args.join(" ")) },
+      readRequestBody: async () => {
+        if (scenario === "body_rejected") throw new Error("body too large");
+        return Buffer.from(scenario === "invalid_json" ? "{" : JSON.stringify(payload));
+      },
+      getHeader: () => scenario === "signature_mismatch" ? "private-signature-value" : "",
+      signaturesMatch: () => !scenario.startsWith("signature_"),
+      addMessage: (value) => { records.push(value); return { record: { id: "event", parsed: { kind: "event" } }, duplicate: false }; },
+      shouldProcessMessage: () => false,
+      sendJson: (response, status) => responses.push(status),
+    });
+    await handler({}, {});
+    const expectedStatus = scenario === "body_rejected" ? 413 : scenario === "invalid_json" ? 400 : scenario.startsWith("signature_") ? 401 : 200;
+    assert.deepEqual(responses, [expectedStatus]);
+    assert.equal(records.length, expectedStatus === 200 ? 1 : 0);
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], new RegExp(`"outcome":"${scenario}"`));
+    assert.doesNotMatch(logs[0], /private-message-content|private-email|private-signature/);
+  }
+});

@@ -1391,10 +1391,15 @@ function shouldProcessMessage(record) {
 }
 
 async function handleWebhook(request, response) {
+  const report = (status, outcome, eventType = "unknown", details = {}) => {
+    const safeEventType = typeof eventType === "string" && /^[a-z_]{1,80}$/.test(eventType) ? eventType : "unknown";
+    console.info("SeaTalk webhook:", JSON.stringify({ status, outcome, eventType: safeEventType, ...details }));
+  };
   let rawBody;
   try {
     rawBody = await readRequestBody(request);
   } catch (error) {
+    report(413, "body_rejected");
     sendJson(response, 413, { ok: false, error: error.message });
     return;
   }
@@ -1403,22 +1408,26 @@ async function handleWebhook(request, response) {
   try {
     payload = JSON.parse(rawBody.toString("utf8"));
   } catch {
+    report(400, "invalid_json");
     sendJson(response, 400, { ok: false, error: "Body phải là JSON hợp lệ" });
     return;
   }
 
   if (payload?.event_type !== "event_verification" && !signaturesMatch(rawBody, getHeader(request, "Signature"))) {
+    report(401, getHeader(request, "Signature") ? "signature_mismatch" : "signature_missing", payload?.event_type);
     sendJson(response, 401, { ok: false, error: "Signature không hợp lệ" });
     return;
   }
 
   if (payload?.event_type === "event_verification") {
     addMessage(payload);
+    report(200, "verification", payload.event_type);
     sendJson(response, 200, payload.event || {});
     return;
   }
 
   const { record, duplicate } = addMessage(payload);
+  report(200, "accepted", payload?.event_type, { duplicate, processed: shouldProcessMessage(record) });
   if (!duplicate && shouldProcessMessage(record)) {
     void processTask(record);
   }

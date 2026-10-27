@@ -20,6 +20,17 @@ Ordered roughly by blast radius.
 - **Do:** Set `SEATALK_SIGNING_SECRET` before binding to a non-loopback host. The server refuses
   non-loopback startup when the secret is empty. `AUTH_DISABLED=true` is loopback-only too.
 
+## Diagnosing missing SeaTalk events
+
+- **What:** Runtime logs emit `SeaTalk webhook:` entries for accepted/verification events,
+  missing/mismatched signatures, invalid JSON, and oversized bodies. Logs contain status,
+  outcome, a bounded event type and processing/deduplication flags, never message text,
+  email, raw payload or signature values.
+- **Do:** If a new mention produces no entry, check SeaTalk Event Callback delivery history,
+  published callback URL, event subscriptions and bot membership. If it produces 401, check
+  the signing secret and delivery Signature header; keep signature verification enabled.
+  Accepted events are stored even when extraction is filtered. Inbox state resets on deploy.
+
 ## Session continuity depends on its signing secret
 
 - **What:** Dashboard sessions are signed cookies checked against the current allowlist on every
