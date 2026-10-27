@@ -23,15 +23,21 @@ compares fixture expectations for deadline, priority, and task.
 | test/access-control.test.js | Public/viewer/owner route matrix, HTML redirects, unknown routes, loopback and same-origin policy |
 | test/google-login.test.js | Signed OAuth state, restart/expiry, cookie binding, error codes and safe logs, host redirect, login-page behavior, verified email, allowlist, and session issuance |
 | test/task-acknowledgement.test.js | PIC-only acknowledgement, Sheet re-read/write, UpdatedAt, idempotence, final statuses, and card update |
+| test/task-reminder.test.js | Command variants/negatives/cap, Vietnam deadline math, per-task DM routing, skip/failure isolation and integration gates |
+| test/seatalk-reminder.test.js | Exact reminder/DONE cards, additive callback parsing, provisional contacts request and positive email cache |
+| test/task-done.test.js | PIC-only status CAS, UpdatedAt, already DONE, gates, missing row, CAS miss, three concurrent clicks, fallback DM and retry |
+| test/server-reminder.test.js | Isolated server orchestration: reminder interception, skipSheet dry run, thread filter, old routes and DONE webhook dispatch |
 | test/sheet-task-updates.test.js | Update-intent/status parsing, A:I row conversion and Creator preservation, Sheet client lookup, update cards, PIC/Creator authorization and PIC notification routing |
 | test/thread-sessions.test.js | Session/task routing, quoted messages, clarification choices, five-task limit, short IDs, reopening |
 | test/fixtures/extraction-cases.json | 46 input messages with deadline, priority, and task expectations |
 | test/eval-extract | CLI evaluator for fixture exact-match rates |
 
-There is no direct test import of server.js. HTTP route handling, webhook signature validation,
-deduplication, SSE lifecycle, and orchestration across modules are not covered by a server-level
-test suite. A local HTTP smoke check remains useful before deployment when credential-file
-access is permitted.
+There is no direct test import of server.js. Reminder tests evaluate selected orchestration
+functions in a VM with injected fakes to avoid startup credential-file reads and network calls.
+They exercise routing but do not start an HTTP listener. Full HTTP route handling, webhook
+signature validation, deduplication and SSE lifecycle still lack a server-level integration
+suite. A local HTTP smoke check remains useful before deployment when credential-file access
+is permitted. Contacts tests validate only the provisional fake contract, not the live API.
 
 ## Fakes and fixture workflow
 

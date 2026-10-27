@@ -77,10 +77,25 @@ SeaTalkClient uses these POST endpoints:
 | /messaging/v2/single_chat | Send a direct message to an employee_code |
 | /messaging/v2/group_chat | Send a group message; thread_id is attached when present |
 | /messaging/v2/update | Replace an existing interactive message by message_id |
+| /contacts/v2/get_employee_code_with_email | Provisional email-to-employee-code lookup for reminders; see verification caveat below |
 
 The app token is cached in SeaTalkClient until near its expiration; a supplied access token
 is treated as non-expiring in this process. src/seatalk.js builds interactive_message cards,
 plain-text assignment notices, and quick-pick values.
+
+Deadline reminders resolve PIC employee codes from in-memory tasks first, then the contacts
+lookup. `getEmployeeCodeByEmail` isolates the provisional POST path above with
+`{ "emails": [email] }`, and expects `results` entries containing matching `email` and
+`employee_code` fields. Only positive matches are cached in a process-local Map; misses and
+errors can be retried. The bot app needs the applicable contacts permission. The official
+Open Platform documentation redirected to login during implementation, so the endpoint,
+response shape, exact permission, and app visibility still require verification before live use.
+No live SeaTalk or Google API calls were made to validate this contract.
+
+Reminder cards use the additive callback `task:done:<sheetTaskId>`; existing callback values
+remain valid. Any sender may request reminders; only the current Sheet PIC email may click DONE.
+Reminder reads do not require `GOOGLE_SHEETS_WRITE_ENABLED`, but DONE writes do.
+Each task gets a separate private card; one summary goes back to the source chat/thread.
 
 The README claims group chats cannot accept interactive_message and describes a DM card plus
 thread text. Current sendConfirmationCard passes buildConfirmationMessage to sendReply using
@@ -115,6 +130,13 @@ New tasks remain TODO after the PIC receives their assignment card. Only the PIC
 column C may acknowledge the card; the Creator cannot acknowledge unless they are also the PIC.
 Acknowledgement re-reads the row and changes TODO to IN PROGRESS, refreshing UpdatedAt. Repeated
 clicks and rows already in IN PROGRESS, DONE, or NOT DO do not change the Sheet row.
+
+The reminder DONE button changes the current row status to DONE and refreshes UpdatedAt using
+`updateTaskIfStatus`. Repeated DONE clicks do not write. The A–I contract is unchanged.
+Reminder deadlines accept strict `dd/mm/yyyy`, `yyyy-mm-dd`, or `dd/mm` (current Vietnam year).
+Calendar dates are compared in Asia/Ho_Chi_Minh; invalid/empty dates show
+`Chưa xác định Deadline` without failing delivery. DONE/NOT DO rows are skipped when sending
+new reminders. Repeated reminder commands intentionally send new cards; no schedule is installed.
 
 GoogleSheetsClient obtains access tokens from the service-account JWT bearer grant, using only
 the spreadsheets scope. The key file defaults to `.auth/google-service-account.json`; keep it

@@ -1,5 +1,7 @@
 function parseConfirmationButtonValue(buttonValue) {
   const value = String(buttonValue || "").trim();
+  const taskDoneMatch = value.match(/^task:done:(\d+)$/);
+  if (taskDoneMatch) return { kind: "task_done", taskId: Number(taskDoneMatch[1]) };
   const taskAckMatch = value.match(/^task:ack:(\d+)$/);
   if (taskAckMatch) return { kind: "task_ack", taskId: Number(taskAckMatch[1]) };
 

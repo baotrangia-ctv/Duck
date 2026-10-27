@@ -1,3 +1,5 @@
+import { computeDeadlineStatus } from "./deadline-status.js";
+
 const DEFAULT_BASE_URL = "https://openapi.seatalk.io";
 
 function asNonEmptyString(value) {
@@ -343,6 +345,34 @@ function buildTaskAssignmentUpdatedMessage(draft) {
   return { tag: "text", text: { format: "2", content } };
 }
 
+function buildTaskReminderMessage(task, { now = new Date() } = {}) {
+  return {
+    tag: "interactive_message",
+    interactive_message: {
+      elements: [
+        { element_type: "title", title: { text: `🚨 [${fieldValue(task.priority)}] Task Deadline Alert` } },
+        { element_type: "description", description: { format: 1, text: [
+          `**Task:** ${fieldValue(task.task)}`,
+          `**Deadline:** ${fieldValue(task.deadline)}`,
+          `**Progress:** ${fieldValue(task.status)}`,
+          `**Status:** ${computeDeadlineStatus(task.deadline, now)}`,
+        ].join("\n") } },
+        { element_type: "button", button: { button_type: "callback", text: "✅ DONE", value: `task:done:${task.id}` } },
+      ],
+    },
+  };
+}
+
+function buildTaskDoneMessage(task) {
+  return {
+    tag: "interactive_message",
+    interactive_message: { elements: [
+      { element_type: "title", title: { text: "✅ Đã hoàn thành" } },
+      { element_type: "description", description: { format: 1, text: buildTaskAssignmentDescription({ ...task, status: "DONE" }) } },
+    ] },
+  };
+}
+
 class SeaTalkClient {
   constructor({
     appId = "",
@@ -356,6 +386,7 @@ class SeaTalkClient {
     this.accessToken = String(accessToken || "").trim();
     this.baseUrl = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
     this.fetchImpl = fetchImpl;
+    this.employeeCodesByEmail = new Map();
     this.tokenExpiresAt = this.accessToken ? Number.MAX_SAFE_INTEGER : 0;
   }
 
@@ -401,6 +432,18 @@ class SeaTalkClient {
       throw new Error(`SeaTalk API lỗi: HTTP ${response.status} ${data.message || `code ${data.code ?? "unknown"}`}`);
     }
     return data;
+  }
+
+  async getEmployeeCodeByEmail(email) {
+    const normalized = String(email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+$/.test(normalized)) return null;
+    if (this.employeeCodesByEmail.has(normalized)) return this.employeeCodesByEmail.get(normalized);
+    // Confirm this endpoint and response shape against SeaTalk Open Platform docs before deployment.
+    const response = await this.request("/contacts/v2/get_employee_code_with_email", { emails: [normalized] });
+    const entry = response.results?.find((item) => String(item.email || "").trim().toLowerCase() === normalized);
+    const code = entry?.exists === false ? null : asNonEmptyString(entry?.employee_code);
+    if (code) this.employeeCodesByEmail.set(normalized, code);
+    return code;
   }
 
   async sendSingleChat(employeeCode, message) {
@@ -452,6 +495,8 @@ export {
   buildTaskAssignmentMessage,
   buildTaskAcknowledgedMessage,
   buildTaskAssignmentUpdatedMessage,
+  buildTaskReminderMessage,
+  buildTaskDoneMessage,
   getDeadlineQuickPickOptions,
   resolveDeadlineQuickPick,
 };

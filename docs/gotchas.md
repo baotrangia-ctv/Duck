@@ -141,11 +141,35 @@ Ordered roughly by blast radius.
 ## Thread replies are selectively processed
 
 - **What:** shouldProcessMessage accepts new_message_received_from_thread only when it has a
-  quotedMessageId or detectTaskIntent recognizes an update.
+  quotedMessageId, detectTaskIntent recognizes an update, or parseReminderCommand matches a
+  deadline-reminder command with IDs.
 - **Why:** A plain reply may appear in the dashboard but will not run extraction.
 - **Where:** server.js shouldProcessMessage.
 - **Do:** Preserve this filter when changing thread behavior; update tests/flow documentation
   if the accepted message set changes.
+
+## Reminder delivery depends on PIC employee-code resolution
+
+- **What:** Column C stores an email, so reminders first use in-memory PIC codes and then a
+  provisional SeaTalk contacts lookup, with positive email/code matches cached in memory.
+- **Why:** After restart the memory shortcut is lost. The lookup POST path/body/response and
+  exact app contacts permission have not been verified against the login-gated official docs.
+- **Where:** src/seatalk.js getEmployeeCodeByEmail and server.js reminder resolver.
+- **Do:** Verify the isolated contacts method against SeaTalk Open Platform before deployment.
+  Faked HTTP tests do not establish live compatibility. A missing code skips that ID; API errors
+  fail only that ID. Each task gets its own DM, and repeated commands send fresh reminders.
+
+## Reminder deadlines and DONE clicks use current Sheet state
+
+- **What:** Reminders skip DONE/NOT DO rows. Deadline text accepts dd/mm/yyyy, yyyy-mm-dd and
+  dd/mm in the current Vietnam year. Invalid dates show `Chưa xác định Deadline`.
+- **Why:** Day comparisons must use Asia/Ho_Chi_Minh calendar dates, including near midnight UTC.
+  JavaScript date rollover must not turn an invalid date such as 31/02 into a valid deadline.
+- **Where:** src/deadline-status.js, src/task-reminder.js, src/task-done.js.
+- **Do:** Keep `task:done:<sheetTaskId>` additive and PIC-only. Re-read the row on each click;
+  compare the current status before setting DONE and UpdatedAt. Concurrent clicks are serialized
+  per task in this process. External Sheet edits are not covered by a distributed lock.
+  `skipSheet` reminder demos must not read Sheets or send any message.
 
 ## Rule markdown is only loaded at module import
 

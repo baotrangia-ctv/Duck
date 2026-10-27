@@ -35,6 +35,8 @@ import {
   isTaskMessageUpdateAuthorized,
 } from "./src/confirmation-auth.js";
 import { handleTaskAcknowledgement as processTaskAcknowledgement } from "./src/task-acknowledgement.js";
+import { handleTaskDone } from "./src/task-done.js";
+import { parseReminderCommand, handleTaskReminder } from "./src/task-reminder.js";
 import { parseConfirmationButtonValue } from "./src/confirmation-routing.js";
 import {
   detectTaskIntent,
@@ -974,6 +976,33 @@ async function requireReferencedSheetTaskUpdate(record, taskId) {
 }
 
 async function processTask(record, { skipSheet = false } = {}) {
+  const reminder = parseReminderCommand(record.parsed.text);
+  if (reminder) {
+    if (skipSheet) {
+      updateProcessing(record, {
+        sheet: { status: "skipped", taskIds: reminder.taskIds },
+        confirmation: { status: "skipped", error: "Chạy thử lệnh nhắc task; không đọc Sheet hoặc gửi tin nhắn." },
+      });
+      return;
+    }
+    updateProcessing(record, { sheet: { status: "reminding", error: "" }, confirmation: { status: "sending", error: "" } });
+    const result = await handleTaskReminder(reminder.taskIds, record, {
+      googleSheets, seatalk, rememberSheetMessage,
+      resolvePicEmployeeCode: async (task) => findInMemoryTaskBySheetId(task.id)?.picEmployeeCode
+        || await seatalk.getEmployeeCodeByEmail(task.pic),
+    });
+    const ids = (values) => values.length ? values.map((value) => `#${typeof value === "number" ? value : value.id}`).join(", ") : "không có";
+    await sendSheetUpdateText(record, [
+      `Đã gửi nhắc task: ${ids(result.sent)}.`,
+      `Bỏ qua: ${result.skipped.length ? result.skipped.map(({ id, reason }) => `#${id} (${reason})`).join(", ") : "không có"}.`,
+      `Thất bại: ${ids(result.failed)}.`,
+    ].join("\n"));
+    updateProcessing(record, {
+      sheet: { status: "reminded", reminder: result },
+      confirmation: { status: result.failed.length ? "reminder_partial_failure" : "reminded", error: result.failed.map(({ id, error }) => `#${id}: ${error}`).join("; ") },
+    });
+    return;
+  }
   const intent = detectTaskIntent(record.parsed.text);
   if (intent?.intent === "unsupported_update_existing_sheet_task") {
     await rejectUnsupportedSheetUpdate(record);
@@ -1064,6 +1093,16 @@ async function sendTaskAssignmentNotification(task, draft) {
   const employeeCode = task.picEmployeeCode;
   if (!employeeCode) throw new Error("Không xác định được employee_code của PIC để gửi thông báo giao task.");
   return seatalk.sendSingleChat(employeeCode, buildTaskAssignmentMessage(draft));
+}
+
+async function markTaskDone(value, clickRecord) {
+  const action = parseConfirmationButtonValue(value);
+  if (action?.kind !== "task_done") return { handled: false };
+  const result = await handleTaskDone(action.taskId, clickRecord, {
+    googleSheets, googleSheetsWriteEnabled, seatalk, updateProcessing,
+  });
+  if (result.messageId) rememberSheetMessage(result.messageId, action.taskId);
+  return result;
 }
 
 async function acknowledgeTask(value, clickRecord) {
@@ -1346,7 +1385,7 @@ function hasInvalidOrigin(request) {
 function shouldProcessMessage(record) {
   if (record?.parsed?.kind !== "message") return false;
   if (record.parsed.eventType === "new_message_received_from_thread") {
-    return Boolean(record.parsed.quotedMessageId || detectTaskIntent(record.parsed.text));
+    return Boolean(record.parsed.quotedMessageId || parseReminderCommand(record.parsed.text) || detectTaskIntent(record.parsed.text));
   }
   return true;
 }
@@ -1387,6 +1426,7 @@ async function handleWebhook(request, response) {
     const action = parseConfirmationButtonValue(record.parsed.buttonValue);
     if (action?.kind === "confirm") void confirmTask(record.parsed.buttonValue, record);
     if (action?.kind === "task_ack") void acknowledgeTask(record.parsed.buttonValue, record);
+    if (action?.kind === "task_done") void markTaskDone(record.parsed.buttonValue, record);
     if (action?.kind === "priority" || action?.kind === "deadline") {
       void updateDraftFieldAndRedraw(record.parsed.buttonValue, record);
     }

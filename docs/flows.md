@@ -172,6 +172,37 @@ error is recorded instead of messaging the Creator.
    ending the stream when access is revoked. On stream error the dashboard calls `/api/me` before
    reconnecting; any API 401 redirects it to `/login`.
 
+## 10. On-demand deadline reminders and DONE
+
+1. Any chat sender may send `@Duck_Test Các task sau cần remind: 2, 3, 4`.
+   `processTask` intercepts the command before quote handling, update intent, extraction, or
+   draft creation. Matching thread replies are also accepted. Matching ignores Vietnamese
+   diacritics and permits leading mentions, optional `#` IDs, spaces, commas and semicolons.
+   IDs are positive safe integers, deduplicated in order and capped at 50; an empty or invalid
+   list falls through to the existing message flow.
+2. `handleTaskReminder` requires configured/authorized Sheets and configured SeaTalk, then
+   reads each ID sequentially. Missing rows, missing PIC emails/codes, and DONE/NOT DO rows
+   are skipped. A lookup or DM failure is recorded per ID and processing continues.
+   The reminder reads Sheets even when Sheet writes are disabled.
+3. The server resolves the PIC employee code from in-memory task state first, then through
+   `SeaTalkClient.getEmployeeCodeByEmail`. Each task produces a separate private interactive
+   card, even when several tasks share one PIC. Returned message IDs are remembered for quotes.
+   The originating chat/thread gets one Vietnamese sent/skipped/failed summary.
+4. The card shows task, deadline, progress (Sheet status), and a deadline comparison by calendar
+   days in Asia/Ho_Chi_Minh. See `src/deadline-status.js`, re-exported from `task-reminder.js`.
+   `skipSheet` demo requests only record parsed IDs; they read nothing and send nothing.
+5. `task:done:<sheetTaskId>` dispatches to `markTaskDone` and `handleTaskDone`. Sheet writes must
+   be enabled, Sheets configured/authorized, and the clicker's email must match the current row's
+   PIC email. Creator identity alone grants no DONE-button permission. State is re-read from
+   Sheets, so this works after restart. Per-ID promise chains serialize concurrent clicks.
+6. An already-DONE row is not written; its clicked card is refreshed and a notice is sent.
+   Otherwise `updateTaskIfStatus` compares the current status, sets F to DONE and refreshes H,
+   preserving A–I. On a comparison miss the handler re-reads and reports the current state.
+   This is a process-local write guard, not a distributed transaction against external editors.
+7. Successful DONE replaces the clicked reminder card with `✅ Đã hoàn thành`, without buttons.
+   Card-update failure falls back to a text DM and records the notification error while retaining
+   successful Sheet processing status. Processing patches continue through the existing SSE flow.
+
 ## Confirmation button-value grammar
 
 parseConfirmationButtonValue accepts these shapes. Values not emitted by the current card
@@ -182,6 +213,7 @@ builder can still parse if their shape is valid; handlers may validate them furt
 | task:confirm:<draftId> | confirm | confirmTask |
 | task:confirmed:<draftId> | confirmed | Display-only completed card; no callback handler |
 | task:ack:<sheetTaskId> | task_ack | acknowledgeTask; reads and updates the PIC's Sheet row |
+| task:done:<sheetTaskId> | task_done | markTaskDone; PIC-only Sheet status DONE and reminder-card replacement |
 | task:priority:<draftId>:P0\|P1\|P2 | priority | updateDraftFieldAndRedraw |
 | task:deadline:<draftId>:<value> | deadline | updateDraftFieldAndRedraw; resolveDeadlineQuickPick accepts today, tomorrow, weekend, +7d |
 | task:clarify:<clarifyId>:new | clarify_new | handleClarification |
