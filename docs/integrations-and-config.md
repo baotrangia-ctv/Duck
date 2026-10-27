@@ -148,6 +148,13 @@ GOOGLE_SHEETS_WRITE_ENABLED=true. The GOOGLE_OAUTH_* variables below are used on
 
 ## Dashboard login
 
+For the Demo System deployment, set `GOOGLE_OAUTH_REDIRECT_URI` to
+`https://craftland-duck.demo.ved.com.vn/auth/google/callback` and register that exact URI
+in the Web OAuth client's Authorized redirect URIs. The localhost default is for local
+development only. Public requests with a loopback callback return `/login?error=config`
+instead of redirecting the visitor to localhost. OAuth client ID/secret and the allowlist
+must still be provisioned separately; correcting the callback alone does not enable login.
+
 Google OAuth is used only for sign-in with `openid email` scopes; it does not grant Sheets API
 access. Configure the Web OAuth client ID/secret and callback URI, then maintain
 `.auth/allowlist.json` with `{ "owners": ["..."], "viewers": ["..."] }`. The role is looked

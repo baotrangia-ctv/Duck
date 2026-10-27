@@ -147,6 +147,18 @@ test("canonical login redirect compares host and port", () => {
   assert.equal(canonicalLoginRedirect("localhost:3030", uri), null);
 });
 
+test("public login rejects loopback callbacks while preserving configured public origins", () => {
+  const publicHost = "craftland-duck.demo.ved.com.vn";
+  for (const loopback of ["localhost", "127.0.0.1", "[::1]"]) {
+    assert.equal(canonicalLoginRedirect(publicHost, `http://${loopback}:3000/auth/google/callback`), "/login?error=config");
+  }
+  const uri = `https://${publicHost}/auth/google/callback`;
+  assert.equal(canonicalLoginRedirect(publicHost, uri), null);
+  assert.equal(canonicalLoginRedirect("alias.example.com", uri), `https://${publicHost}/auth/login`);
+  assert.equal(canonicalLoginRedirect("localhost.evil.example", "http://localhost:3000/auth/google/callback"), "/login?error=config");
+  assert.equal(canonicalLoginRedirect("[::1]:3001", "http://localhost:3000/auth/google/callback"), "http://localhost:3000/auth/login");
+});
+
 test("login messages cover known codes and reject unknown query text", () => {
   const page = readFileSync(new URL("../public/login.html", import.meta.url), "utf8");
   const script = page.match(/<script>([\s\S]*?)<\/script>/)?.[1];

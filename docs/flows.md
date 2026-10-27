@@ -135,6 +135,8 @@ error is recorded instead of messaging the Creator.
 
 1. `/login` immediately continues to `/auth/login` unless an error or logout message is present.
    `/auth/login` first redirects to the origin of `GOOGLE_OAUTH_REDIRECT_URI` when its Host differs.
+   If a public request would be redirected to a loopback callback, it returns the local
+   `/login?error=config` page instead.
    It signs a ten-minute state with the persistent session secret, binds it to the
    `alpha_oauth_state` HttpOnly/SameSite cookie on `/auth`, and redirects to Google with
    `openid email` scopes and `prompt=select_account`. It requests neither offline access nor consent.

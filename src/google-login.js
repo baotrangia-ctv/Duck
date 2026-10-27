@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getCookieValue, OAUTH_STATE_COOKIE } from "./session.js";
+import { isLoopbackHost } from "./access-control.js";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -9,6 +10,10 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 function canonicalLoginRedirect(requestHost, redirectUri) {
   try {
     const origin = new URL(redirectUri);
+    const requestOrigin = new URL(`http://${requestHost}`);
+    const loopback = (hostname) => isLoopbackHost(hostname.replace(/^\[|\]$/g, ""));
+    // A local development callback must never redirect a public visitor to their own machine.
+    if (loopback(origin.hostname) && !loopback(requestOrigin.hostname)) return "/login?error=config";
     return requestHost === origin.host ? null : `${origin.origin}/auth/login`;
   } catch {
     return null;
