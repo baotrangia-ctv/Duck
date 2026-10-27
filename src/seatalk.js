@@ -438,10 +438,17 @@ class SeaTalkClient {
     const normalized = String(email || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+$/.test(normalized)) return null;
     if (this.employeeCodesByEmail.has(normalized)) return this.employeeCodesByEmail.get(normalized);
-    // Confirm this endpoint and response shape against SeaTalk Open Platform docs before deployment.
+    // https://open.seatalk.io/docs/get-employee-code-with-email
     const response = await this.request("/contacts/v2/get_employee_code_with_email", { emails: [normalized] });
-    const entry = response.results?.find((item) => String(item.email || "").trim().toLowerCase() === normalized);
-    const code = entry?.exists === false ? null : asNonEmptyString(entry?.employee_code);
+    const matches = (Array.isArray(response.employees) ? response.employees : []).filter((item) =>
+      String(item.email || "").trim().toLowerCase() === normalized
+      && Number(item.code) === 0
+      && [1, 2, 3].includes(Number(item.employee_status))
+      && asNonEmptyString(item.employee_code));
+    const inPosition = matches.filter((item) => Number(item.employee_status) === 2);
+    // The same email can also belong to terminated employees; never guess between current identities.
+    const codes = new Set((inPosition.length ? inPosition : matches).map((item) => asNonEmptyString(item.employee_code)));
+    const code = codes.size === 1 ? [...codes][0] : null;
     if (code) this.employeeCodesByEmail.set(normalized, code);
     return code;
   }

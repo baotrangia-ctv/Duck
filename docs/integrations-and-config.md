@@ -77,20 +77,27 @@ SeaTalkClient uses these POST endpoints:
 | /messaging/v2/single_chat | Send a direct message to an employee_code |
 | /messaging/v2/group_chat | Send a group message; thread_id is attached when present |
 | /messaging/v2/update | Replace an existing interactive message by message_id |
-| /contacts/v2/get_employee_code_with_email | Provisional email-to-employee-code lookup for reminders; see verification caveat below |
+| /contacts/v2/get_employee_code_with_email | Resolve PIC emails for reminders; requires Get Employee Code with Email permission |
 
 The app token is cached in SeaTalkClient until near its expiration; a supplied access token
 is treated as non-expiring in this process. src/seatalk.js builds interactive_message cards,
 plain-text assignment notices, and quick-pick values.
 
 Deadline reminders resolve PIC employee codes from in-memory tasks first, then the contacts
-lookup. `getEmployeeCodeByEmail` isolates the provisional POST path above with
-`{ "emails": [email] }`, and expects `results` entries containing matching `email` and
-`employee_code` fields. Only positive matches are cached in a process-local Map; misses and
-errors can be retried. The bot app needs the applicable contacts permission. The official
-Open Platform documentation redirected to login during implementation, so the endpoint,
-response shape, exact permission, and app visibility still require verification before live use.
-No live SeaTalk or Google API calls were made to validate this contract.
+lookup. The [official API](https://open.seatalk.io/docs/get-employee-code-with-email)
+specifies POST with `{ "emails": [email] }` and an `employees` array containing per-entry
+`code`, `email`, `employee_code` and `employee_status`. `getEmployeeCodeByEmail` matches
+the email, ignores per-entry errors and terminated/not-found employees, and prefers a unique
+in-position identity. If none is in position, only a unique pending/leaving identity is used;
+ambiguous current identities are skipped. Only positive matches are cached in a process-local
+Map; misses and errors can be retried.
+
+Enable **Get Employee Code with Email** in the bot's Scopes & Permissions. This API is listed
+as **No Limit** and does not require administrator approval in the current console; enabling
+it still grants app access to employee-code lookup and requires owner authorization.
+HTTP 200 can contain an API failure: code 103 / `app permission denied` means the app lacks
+the API permission. Sending DMs separately requires **Send Message to Bot User** and remains
+limited by the app's Service Scope. Permission to look up a PIC does not itself permit DM delivery.
 
 Reminder cards use the additive callback `task:done:<sheetTaskId>`; existing callback values
 remain valid. Any sender may request reminders; only the current Sheet PIC email may click DONE.

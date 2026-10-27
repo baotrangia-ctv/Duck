@@ -162,12 +162,12 @@ Ordered roughly by blast radius.
 ## Reminder delivery depends on PIC employee-code resolution
 
 - **What:** Column C stores an email, so reminders first use in-memory PIC codes and then a
-  provisional SeaTalk contacts lookup, with positive email/code matches cached in memory.
-- **Why:** After restart the memory shortcut is lost. The lookup POST path/body/response and
-  exact app contacts permission have not been verified against the login-gated official docs.
+  SeaTalk contacts lookup, with positive email/code matches cached in memory.
+- **Why:** After restart the memory shortcut is lost. The documented response uses `employees`,
+  not `results`, and an email may match both current and terminated employees.
 - **Where:** src/seatalk.js getEmployeeCodeByEmail and server.js reminder resolver.
-- **Do:** Verify the isolated contacts method against SeaTalk Open Platform before deployment.
-  Faked HTTP tests do not establish live compatibility. A missing code skips that ID; API errors
+- **Do:** Enable the app's **Get Employee Code with Email** permission with owner authorization.
+  HTTP 200 / API code 103 is a permission error, not success. A missing code skips that ID; API errors
   fail only that ID. Each task gets its own DM, and repeated commands send fresh reminders.
 
 ## Reminder deadlines and DONE clicks use current Sheet state

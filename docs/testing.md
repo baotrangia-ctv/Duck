@@ -24,7 +24,7 @@ compares fixture expectations for deadline, priority, and task.
 | test/google-login.test.js | Signed OAuth state, restart/expiry, cookie binding, error codes and safe logs, host redirect, login-page behavior, verified email, allowlist, and session issuance |
 | test/task-acknowledgement.test.js | PIC-only acknowledgement, Sheet re-read/write, UpdatedAt, idempotence, final statuses, and card update |
 | test/task-reminder.test.js | Command variants/negatives/cap, Vietnam deadline math, per-task DM routing, skip/failure isolation and integration gates |
-| test/seatalk-reminder.test.js | Exact reminder/DONE cards, additive callback parsing, provisional contacts request and positive email cache |
+| test/seatalk-reminder.test.js | Exact reminder/DONE cards, additive callback parsing, documented contacts response, positive email cache, employee statuses/ambiguity and API code 103 |
 | test/task-done.test.js | PIC-only status CAS, UpdatedAt, already DONE, gates, missing row, CAS miss, three concurrent clicks, fallback DM and retry |
 | test/server-reminder.test.js | Isolated server orchestration: reminder interception, skipSheet dry run, thread filter, old routes and DONE webhook dispatch |
 | test/sheet-task-updates.test.js | Update-intent/status parsing, A:I row conversion and Creator preservation, Sheet client lookup, update cards, PIC/Creator authorization and PIC notification routing |
@@ -37,7 +37,8 @@ functions in a VM with injected fakes to avoid startup credential-file reads and
 They exercise routing but do not start an HTTP listener. Full HTTP route handling, webhook
 signature validation, deduplication and SSE lifecycle still lack a server-level integration
 suite. A local HTTP smoke check remains useful before deployment when credential-file access
-is permitted. Contacts tests validate only the provisional fake contract, not the live API.
+is permitted. Contacts tests follow the official `employees` response using fakes; they do not
+verify deployed app permissions or Service Scope. Live read-only diagnosis requires authorization.
 
 ## Fakes and fixture workflow
 

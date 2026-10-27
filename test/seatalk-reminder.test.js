@@ -29,11 +29,15 @@ test("DONE callback parser is additive and rejects invalid suffixes", () => {
   for (const value of ["task:done:abc", "task:done:-1", "task:done:12:extra", "task:done:"]) assert.equal(parseConfirmationButtonValue(value), null);
 });
 
-test("employee lookup isolates the provisional POST contract and caches only positive matched emails", async () => {
+test("employee lookup uses the documented employees response and caches only positive matched emails", async () => {
   const calls = [];
   const client = new SeaTalkClient({ accessToken: "fake", fetchImpl: async (url, options) => {
     calls.push({ url, options });
-    return { ok: true, json: async () => ({ code: 0, results: [{ email: "other@example.com", employee_code: "wrong" }, { email: "pic@example.com", employee_code: "PIC", exists: true }] }) };
+    return { ok: true, json: async () => ({ code: 0, employees: [
+      { code: 0, email: "other@example.com", employee_code: "wrong", employee_status: 2 },
+      { code: 0, email: "pic@example.com", employee_code: "old", employee_status: 4 },
+      { code: 0, email: "pic@example.com", employee_code: "PIC", employee_status: 2 },
+    ] }) };
   } });
   assert.equal(await client.getEmployeeCodeByEmail(" PIC@Example.com "), "PIC");
   assert.equal(await client.getEmployeeCodeByEmail("pic@example.com"), "PIC");
@@ -52,9 +56,38 @@ test("employee lookup surfaces API errors without caching a missing result", asy
   let calls = 0;
   const client = new SeaTalkClient({ accessToken: "fake", fetchImpl: async () => {
     calls++;
-    return { ok: calls > 1, status: calls > 1 ? 200 : 403, json: async () => calls > 1 ? { code: 0, results: [] } : { code: 403 } };
+    return { ok: calls > 1, status: calls > 1 ? 200 : 403, json: async () => calls > 1 ? { code: 0, employees: [] } : { code: 403 } };
   } });
   await assert.rejects(client.getEmployeeCodeByEmail("pic@example.com"), /403/);
   assert.equal(await client.getEmployeeCodeByEmail("pic@example.com"), null);
+  assert.equal(calls, 2);
+});
+
+test("employee lookup rejects not-found, terminated and ambiguous identities and prefers an in-position employee", async () => {
+  const employee = (employee_code, employee_status = 2, code = 0) => ({ email: "pic@example.com", employee_code, employee_status, code });
+  const cases = [
+    [[employee(null, 0, 3000)], null],
+    [[employee("former", 4)], null],
+    [[employee("a"), employee("b")], null],
+    [[employee("pending", 1), employee("current"), employee("leaving", 3)], "current"],
+    [[employee("leaving", 3)], "leaving"],
+    [[employee("pending", 1)], "pending"],
+    [[employee("unknown", 0)], null],
+    [[employee("", 2)], null],
+  ];
+  for (const [employees, expected] of cases) {
+    const client = new SeaTalkClient({ accessToken: "fake", fetchImpl: async () => ({ ok: true, json: async () => ({ code: 0, employees }) }) });
+    assert.equal(await client.getEmployeeCodeByEmail("pic@example.com"), expected);
+  }
+});
+
+test("HTTP 200 with app permission denied is an API failure and is not cached", async () => {
+  let calls = 0;
+  const client = new SeaTalkClient({ accessToken: "fake", fetchImpl: async () => {
+    calls++;
+    return { ok: true, status: 200, json: async () => ({ code: 103, message: "app permission denied" }) };
+  } });
+  await assert.rejects(client.getEmployeeCodeByEmail("pic@example.com"), /HTTP 200 app permission denied/);
+  await assert.rejects(client.getEmployeeCodeByEmail("pic@example.com"), /app permission denied/);
   assert.equal(calls, 2);
 });
